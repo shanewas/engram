@@ -22,7 +22,24 @@ $StateFile      = Join-Path $repo '.git\engram-state'
 $AlertFile      = Join-Path $repo 'ALERT.md'
 $ReadOnlyMarker = Join-Path $repo '.git\engram-readonly'
 $StaleSecs      = 300
-$Allowlist      = @('index.md', 'projects', 'global', 'inbox', 'archive')
+$NudgeDays      = 7
+
+# section 3 commit allowlist: read from scripts/sync-paths.conf (one path per
+# line, '#' comments). The conf lives under scripts/ = code, so changing WHAT
+# syncs still requires a deliberate manual commit. Absolute/drive-rooted paths
+# and '..' entries are ignored; missing/empty conf falls back to the default.
+$AllowlistDefault = @('index.md', 'projects', 'global', 'inbox', 'archive')
+$AllowlistConf    = Join-Path $repo 'scripts\sync-paths.conf'
+$Allowlist = @()
+if (Test-Path $AllowlistConf) {
+    foreach ($line in @(Get-Content $AllowlistConf 2>$null)) {
+        $p = (([string]$line) -replace '#.*$', '').Trim()
+        if (-not $p) { continue }
+        if ($p.StartsWith('/') -or $p.StartsWith('\') -or $p -match '^[A-Za-z]:' -or $p -match '\.\.') { continue }
+        $Allowlist += $p
+    }
+}
+if ($Allowlist.Count -eq 0) { $Allowlist = $AllowlistDefault }
 
 # --- section 1: guards - apply to every remote git operation ---
 $env:GIT_TERMINAL_PROMPT = '0'
@@ -120,8 +137,24 @@ function Invoke-Escalate([string]$Reason) {
     $branch = "conflict/$NodeName"
     $out = (Invoke-GitRemote push --force origin "HEAD:$branch" 2>&1 | Out-String)
     $rc = $LASTEXITCODE
-    $lines = @(
-        '# Engram sync ALERT'
+    $lines = @('# Engram sync ALERT', '')
+    if ($rc -eq 0) {
+        $lines += @(
+            "**Your memory could not sync - but nothing is lost.** This machine's"
+            'changes are parked safely on the hub. To fix it, open Claude Code and'
+            'say: "consolidate memory".'
+            ''
+        )
+    } else {
+        $lines += @(
+            '**Your memory could not sync, and parking the changes on the hub also'
+            'failed - they exist only on this machine right now.** Nothing is'
+            'deleted. Check your internet connection / git login, then re-run sync.'
+            ''
+        )
+    }
+    $lines += @(
+        'Details (for the fix):'
         ''
         "- node: $NodeName"
         "- time: $(Get-IsoNow)"
@@ -167,7 +200,10 @@ function Invoke-PullRebase {
 # --- section 7: secret scan - scans ADDED lines of the staged diff only ---
 function Get-SecretHits {
     $diff  = & git diff --cached -U0 --text 2>$null
-    $added = @($diff | Where-Object { $_ -match '^\+' -and $_ -notmatch '^\+\+\+' })
+    # section 7 false-positive escape hatch: a line tagged 'engram:not-a-secret'
+    # is excluded from the scan. The sanctioned path for already-redacted text -
+    # the alternative is people learning to bypass the scan entirely.
+    $added = @($diff | Where-Object { $_ -match '^\+' -and $_ -notmatch '^\+\+\+' -and $_ -notmatch 'engram:not-a-secret' })
     $hits  = New-Object System.Collections.Generic.List[string]
     if ($added.Count -eq 0) { return $hits }
     $blob = $added -join "`n"
@@ -195,6 +231,12 @@ function Write-SecretAlert($Labels) {
     $lines = @(
         '# Engram sync ALERT'
         ''
+        '**Upload stopped: something that looks like a password or key was found'
+        'in your changes.** Nothing was uploaded and nothing is lost - the change'
+        'is still in your files, just not synced yet.'
+        ''
+        'Details (for the fix):'
+        ''
         "- node: $NodeName"
         "- time: $(Get-IsoNow)"
         '- reason: secret scan matched staged changes; commit refused'
@@ -205,9 +247,37 @@ function Write-SecretAlert($Labels) {
     $lines += @(
         ''
         'The change was NOT committed and remains unstaged in your working tree.'
-        'Remove the secret, then re-run: scripts\sync.ps1 push'
+        'To fix, open the file and either:'
+        ''
+        '- remove the secret (real secrets never belong in memory), or'
+        '- if the line is a false alarm (e.g. already-redacted text), append'
+        '  `<!-- engram:not-a-secret -->` to that exact line.'
+        ''
+        'Then re-run: scripts\sync.ps1 push (Linux: scripts/sync.sh push).'
+        'Never work around this scan by committing manually.'
     )
     Write-NoBom $AlertFile (($lines -join "`n") + "`n")
+}
+
+# Maintenance nudge: the consolidate skill appends "- YYYY-MM-DD <host>" to
+# archive/consolidate-log.md on every run (synced - the newest date is
+# cluster-wide). Printed on successful pull only: that stdout reaches the
+# session context. No log file = never consolidated = stay quiet (fresh setup).
+function Show-ConsolidateNudge {
+    $log = Join-Path $repo 'archive\consolidate-log.md'
+    if (-not (Test-Path $log)) { return }
+    $last = $null
+    foreach ($line in @(Get-Content $log 2>$null)) {
+        if (([string]$line) -match '^- (\d{4}-\d{2}-\d{2})') { $last = $Matches[1] }
+    }
+    if (-not $last) { return }
+    try {
+        $ts = [DateTimeOffset]::Parse(($last + 'T00:00:00Z'), [System.Globalization.CultureInfo]::InvariantCulture)
+        $days = [int][Math]::Floor(([DateTimeOffset]::UtcNow - $ts.ToUniversalTime()).TotalDays)
+        if ($days -ge $NudgeDays) {
+            Write-Output ('[engram] Last memory consolidation was {0} days ago - say "consolidate memory" when convenient.' -f $days)
+        }
+    } catch {}
 }
 
 # --- section 4: modes ---
@@ -218,12 +288,29 @@ try {
     if (-not (Get-EngramLock)) { exit 0 }
     Repair-Rebase
 
-    if ($Mode -eq 'pull') {
+    # section 4 step 0 (both modes) - a node with no 'origin' remote cannot sync
+    # at all. That is a standing configuration failure, not a transient one:
+    # warn loudly (stdout lands in the session context via the SessionStart
+    # hook), record err, and stop. Silence here would be exactly the "silently
+    # diverges" failure the contract forbids.
+    & git remote get-url origin 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Output @'
+[engram] NOT CONNECTED: this memory repo has no 'origin' remote, so nothing
+syncs to or from your other machines. Facts saved here stay on this machine
+only. Fix it once: create a private GitHub repo, then run
+    git remote add origin <your-private-repo-url>
+from the repo root and re-run sync - or run scripts\setup.ps1 for a guided setup.
+'@
+        Set-StateErr 'no origin remote configured'
+    }
+    elseif ($Mode -eq 'pull') {
         $r = Invoke-PullRebase
         if ($r -eq 0) {
             Update-Skills
             if (Test-Path $AlertFile) { Remove-Item $AlertFile -Force 2>$null }
             Set-StateOk
+            Show-ConsolidateNudge
         } elseif ($r -eq 1) {
             Invoke-Escalate 'pull: rebase onto origin/main conflicted'
         } else {

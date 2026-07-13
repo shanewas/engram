@@ -26,70 +26,47 @@ And if something goes wrong — say two computers edit the same line at the same
 
 ## Setup
 
-### Step 1 — Create your own private repo (once)
+**Easiest way (no terminal knowledge needed):** open Claude Code on the new machine and paste the prompt from [`SETUP-PROMPT.md`](SETUP-PROMPT.md). Claude does everything below for you and reports back in plain language.
 
-This repo you're reading is only a **template**. Your actual memories must live in a separate, **private** repo that only you can see:
+### Step 1 — Get the files onto the machine
 
-```
-gh repo create my-engram --private
-```
-
-(Or click "New repository" on GitHub and tick **Private**.)
-
-### Step 2 — Set up your first computer
-
-Clone the template, then run the setup script pointing at your private repo:
-
-**Windows:**
+Your actual memories live in a separate, **private** repo that only you can see — this repo is only the template. First machine: clone the template. Every other machine: clone *your private repo* instead.
 
 ```
-git clone https://github.com/shanewas/engram.git %USERPROFILE%\engram
-powershell -NoProfile -ExecutionPolicy Bypass -File %USERPROFILE%\engram\scripts\bootstrap.ps1 -Remote https://github.com/<you>/my-engram.git
+git clone https://github.com/shanewas/engram.git ~/engram              # first machine
+git clone https://github.com/<you>/my-engram.git ~/engram              # every other machine
 ```
 
-**Linux / server:**
+(Windows: clone to `%USERPROFILE%\engram`.)
+
+### Step 2 — Run the guided setup
 
 ```
-git clone https://github.com/shanewas/engram.git ~/engram
-bash ~/engram/scripts/setup-vps.sh --remote https://github.com/<you>/my-engram.git
+bash ~/engram/scripts/setup.sh                                              # Linux / server
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup.ps1       # Windows
 ```
 
-The script connects your local copy to your private repo, hooks up the automatic syncing, installs the skills, and sets up the 30-minute background sync. Restart Claude Code and you're done.
+It asks three plain questions — where's your hub (it can create the private repo for you), can this machine save memories or only read them, and should any folders be skipped on this machine — then wires everything: automatic syncing around your Claude Code sessions, the skills, the 30-minute background sync, and it registers the machine in your memory's machine list. Restart Claude Code and you're done.
 
-> **Tip:** make sure `git push` to your private repo works without asking for a password (use an SSH key, or let git remember your token). Engram never pops up a login prompt — if it can't log in, it just waits and warns you instead.
+> **Tip:** the one step that may ask for a GitHub login is the first upload. After that, make sure `git push` works without prompting (SSH key, or let git remember your token) — engram never pops up a login prompt on its own; if it can't log in it just waits and warns you instead.
 
-### Step 3 — Every other computer
-
-**All your computers share the same private repo** — that's the whole point. On each additional machine, clone *your private repo* (not this template) and run the same setup with no remote argument:
-
-**Windows:**
+<details>
+<summary>Scripted / non-interactive setup (the wizard wraps these)</summary>
 
 ```
-git clone https://github.com/<you>/my-engram.git %USERPROFILE%\engram
-powershell -NoProfile -ExecutionPolicy Bypass -File %USERPROFILE%\engram\scripts\bootstrap.ps1
+bash scripts/setup-vps.sh --remote https://github.com/<you>/my-engram.git [--read-only]   # Linux
+scripts\bootstrap.ps1 -Remote https://github.com/<you>/my-engram.git [-ReadOnly]          # Windows
 ```
 
-**Linux / server:**
-
-```
-git clone https://github.com/<you>/my-engram.git ~/engram
-bash ~/engram/scripts/setup-vps.sh
-```
-
-That's it. Adding a new machine later is the same two commands.
-
-### Optional: read-only computers
-
-For a machine that should *read* your memory but never *write* to it (a work computer, for example):
-
-```
-scripts\bootstrap.ps1 -ReadOnly          # Windows
-bash scripts/setup-vps.sh --read-only    # Linux
-```
+</details>
 
 ### Optional: computers without Claude Code
 
-A machine running some other AI tool can still join. The setup script's 30-minute background sync works on its own, and the memory is just markdown — point your other tool at `~/engram/index.md` and let it add quick notes to `inbox/`. Claude will file them properly at the next tidy-up.
+A machine running some other AI tool can still join. The 30-minute background sync works on its own, and the memory is just markdown. Give the other agent the standing rules in [`AGENTS.md`](AGENTS.md): read `index.md` at session start, append quick notes to `inbox/` — Claude files them properly at the next tidy-up.
+
+### Optional: bringing old memory in
+
+Already have notes or CLAUDE.md memory on a machine? After setup, tell Claude Code: *"migrate my memory"* — the `migrate` skill sweeps this machine's existing memory into engram (and knows what to leave behind).
 
 ## Everyday use
 
@@ -111,8 +88,8 @@ Want to sync by hand right now? `scripts\sync.ps1 push` (Windows) or `./scripts/
 | `global/` | Your preferences and facts about your machines |
 | `inbox/` | Quick captures, filed properly at the next tidy-up |
 | `archive/` | Old projects and compressed history |
-| `scripts/` | Setup and sync scripts |
-| `.claude/skills/` | The `remember` and `consolidate` skills |
+| `scripts/` | Setup and sync scripts (incl. `sync-paths.conf` — the list of folders that sync) |
+| `.claude/skills/` | The `remember`, `consolidate`, and `migrate` skills |
 
 ## Is my data safe?
 
@@ -123,7 +100,8 @@ Want to sync by hand right now? `scripts\sync.ps1 push` (Windows) or `./scripts/
 
 ## When something looks wrong
 
-- **Health check:** run `scripts\doctor.ps1` (Windows) or `scripts/doctor.sh` (Linux). It verifies everything is wired up and can reach GitHub.
+- **Quick status in plain words:** `scripts/doctor.sh --status` (Windows: `scripts\doctor.ps1 -Status`) — healthy or not, when this machine last synced, and when each of your machines was last seen.
+- **Full health check:** run `scripts\doctor.ps1` (Windows) or `scripts/doctor.sh` (Linux). It verifies everything is wired up and can reach GitHub.
 - **A file called `ALERT.md` appeared:** a sync hit a snag. Open it — it says what happened — then tell Claude to *"consolidate memory"* and it will sort it out. Your changes are safe on the central repo the whole time.
 - **Memory seems out of date:** run the health check, or just sync by hand (see above).
 - **Want an old version of a memory back?** It's git, so every version is kept:
