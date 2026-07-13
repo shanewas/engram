@@ -491,6 +491,143 @@ test_not_a_git_repo() {
 }
 
 # ===========================================================================
+# 12. allowlist conf: scripts/sync-paths.conf drives what syncs; unsafe entries ignored
+# ===========================================================================
+test_allowlist_conf() {
+  local base="$WORK/t12" origin nodeA
+  make_world "$base"
+  origin="$base/origin.git"; nodeA="$base/nodeA"
+
+  cat > "$nodeA/scripts/sync-paths.conf" <<'EOF'
+# test conf — default list plus an extra folder
+index.md
+projects
+global
+inbox
+archive
+vault    # trailing comment
+/etc
+../escape
+EOF
+  mkdir -p "$nodeA/vault"
+  echo "deep archive note" > "$nodeA/vault/v.md"
+  echo "echo evil" > "$nodeA/scripts/evil2.sh"
+
+  q run_sync "$nodeA" push
+
+  local ok=1 detail=""
+  git -C "$origin" show main:vault/v.md 2>/dev/null | grep -q "deep archive note" || { ok=0; detail="$detail conf-added vault/ NOT committed;"; }
+  git -C "$origin" show main:scripts/evil2.sh >/dev/null 2>&1 && { ok=0; detail="$detail scripts/evil2.sh committed (conf must not widen to scripts/);"; }
+  git -C "$origin" show main:scripts/sync-paths.conf >/dev/null 2>&1 && { ok=0; detail="$detail the conf itself was committed (it is code);"; }
+
+  if [ "$ok" = 1 ]; then
+    pass "12 allowlist conf (vault/ synced via conf; scripts/ and the conf itself still excluded; unsafe entries ignored)"
+  else
+    fail "12 allowlist conf" "$detail"
+  fi
+}
+
+# ===========================================================================
+# 13. secret scan marker: engram:not-a-secret line is exempt; unmarked twin still refused
+# ===========================================================================
+test_secret_marker() {
+  local base="$WORK/t13a" origin nodeA
+  make_world "$base"
+  origin="$base/origin.git"; nodeA="$base/nodeA"
+
+  printf '\n- API Token: cfat_REDACTED_PLACEHOLDER_1234 <!-- engram:not-a-secret -->\n' >> "$nodeA/projects/x.md"
+  q run_sync "$nodeA" push
+
+  local ok=1 detail=""
+  git -C "$origin" show main:projects/x.md 2>/dev/null | grep -q "engram:not-a-secret" || { ok=0; detail="$detail marked line did NOT commit;"; }
+  [ -f "$nodeA/ALERT.md" ] && { ok=0; detail="$detail ALERT.md raised despite marker;"; }
+  if [ "$ok" = 1 ]; then
+    pass "13a secret marker (marked false-positive line commits, no alert)"
+  else
+    fail "13a secret marker (marked line)" "$detail"
+  fi
+
+  local base2="$WORK/t13b" origin2 nodeA2
+  make_world "$base2"
+  origin2="$base2/origin.git"; nodeA2="$base2/nodeA"
+
+  printf '\n- API Token: cfat_REDACTED_PLACEHOLDER_1234\n' >> "$nodeA2/projects/x.md"
+  q run_sync "$nodeA2" push
+
+  local ok2=1 detail2=""
+  git -C "$origin2" show main:projects/x.md 2>/dev/null | grep -q "cfat_REDACTED" && { ok2=0; detail2="$detail2 unmarked credential-like line LEAKED;"; }
+  [ -f "$nodeA2/ALERT.md" ] || { ok2=0; detail2="$detail2 ALERT.md missing;"; }
+  if [ -f "$nodeA2/ALERT.md" ] && ! grep -q "engram:not-a-secret" "$nodeA2/ALERT.md"; then
+    ok2=0; detail2="$detail2 alert does not name the marker escape hatch;"
+  fi
+  if [ "$ok2" = 1 ]; then
+    pass "13b secret marker (unmarked twin still refused; alert names the marker)"
+  else
+    fail "13b secret marker (unmarked line)" "$detail2"
+  fi
+}
+
+# ===========================================================================
+# 14. no origin remote: exit 0, NOT CONNECTED warning on stdout, state err
+# ===========================================================================
+test_no_origin() {
+  local base="$WORK/t14" nodeA
+  make_world "$base"
+  nodeA="$base/nodeA"
+  q git -C "$nodeA" remote remove origin
+
+  local mode
+  for mode in pull push; do
+    echo "local edit" > "$nodeA/projects/x.md"
+    local out rc
+    out="$(run_sync "$nodeA" "$mode")"
+    rc=$?
+    local ok=1 detail=""
+    [ "$rc" -eq 0 ] || { ok=0; detail="$detail rc=$rc (expected 0);"; }
+    printf '%s' "$out" | grep -q "NOT CONNECTED" || { ok=0; detail="$detail stdout lacks NOT CONNECTED warning (got: $out);"; }
+    case "$(cat "$nodeA/.git/engram-state" 2>/dev/null)" in
+      err\ *no\ origin*) : ;;
+      *) ok=0; detail="$detail engram-state not 'err ... no origin ...';" ;;
+    esac
+    if [ "$ok" = 1 ]; then
+      pass "14 no origin remote ($mode): exit 0, loud warning, state err"
+    else
+      fail "14 no origin remote ($mode)" "$detail"
+    fi
+  done
+}
+
+# ===========================================================================
+# 15. consolidate nudge: stale log nudges on successful pull; fresh log stays quiet
+# ===========================================================================
+test_consolidate_nudge() {
+  local base="$WORK/t15" nodeA
+  make_world "$base"
+  nodeA="$base/nodeA"
+
+  printf '# consolidate log\n\n- 2020-01-01 nodea\n' > "$nodeA/archive/consolidate-log.md"
+  local out
+  out="$(run_sync "$nodeA" pull)"
+  local ok=1 detail=""
+  printf '%s' "$out" | grep -qi "consolidat" || { ok=0; detail="$detail stale log produced no nudge (got: $out);"; }
+  if [ "$ok" = 1 ]; then
+    pass "15a consolidate nudge (stale log -> reminder printed on pull)"
+  else
+    fail "15a consolidate nudge (stale)" "$detail"
+  fi
+
+  printf '# consolidate log\n\n- %s nodea\n' "$(date -u +%Y-%m-%d)" > "$nodeA/archive/consolidate-log.md"
+  out="$(run_sync "$nodeA" pull)"
+  local ok2=1 detail2=""
+  printf '%s' "$out" | grep -qi "consolidat" && { ok2=0; detail2="$detail2 fresh log still nudged (got: $out);"; }
+  if [ "$ok2" = 1 ]; then
+    pass "15b consolidate nudge (fresh log -> quiet)"
+  else
+    fail "15b consolidate nudge (fresh)" "$detail2"
+  fi
+}
+
+# ===========================================================================
 main() {
   echo "== engram sync contract tests (SYNC_IMPL=$SYNC_IMPL) =="
   echo "impl under test: $SYNC_SRC"
@@ -508,6 +645,10 @@ main() {
   test_readonly
   test_never_blocks
   test_not_a_git_repo
+  test_allowlist_conf
+  test_secret_marker
+  test_no_origin
+  test_consolidate_nudge
 
   echo
   echo "== summary: $PASS passed, $FAIL failed (of $((PASS+FAIL)) checks) =="
