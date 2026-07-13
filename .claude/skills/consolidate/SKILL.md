@@ -7,7 +7,7 @@ description: Consolidate the engram shared memory repo — resolve sync alerts a
 
 Goal: total always-loaded context stays small; every fact stays findable; the node's sync state is healthy. Repo: `~/engram` (Windows: `%USERPROFILE%\engram`).
 
-Unlike `remember`, this skill **does** run git directly — sync hooks only ever touch the commit allowlist (`index.md projects/ global/ inbox/ archive/`), so resolving alerts, conflict branches, and stray files needs a human-equivalent hand on the repo.
+Unlike `remember`, this skill **does** run git directly — sync hooks only ever touch the commit allowlist (`scripts/sync-paths.conf`; default `index.md projects/ global/ inbox/ archive/`), so resolving alerts, conflict branches, and stray files needs a human-equivalent hand on the repo.
 
 1. Sync first: run `scripts/sync.sh pull` (Linux) or `scripts\sync.ps1 pull` (Windows).
 2. `ALERT.md` present at repo root? Read it — it names what failed and which `conflict/<host>` branch holds the commits. Resolve via step 3, then delete `ALERT.md`.
@@ -17,5 +17,6 @@ Unlike `remember`, this skill **does** run git directly — sync hooks only ever
 6. Per project file: dedupe; resolve contradictions (newest dated fact wins — verify against the actual code if the repo is reachable on this machine); compress entries older than ~90 days into a short summary block; enforce < 300 lines.
 7. Archive: projects inactive > 6 months → move file to `archive/`, remove its index row, add one line to `archive/README.md`.
 8. Rebuild the Projects table in `index.md`; enforce < 100 lines total.
-9. Report in a few lines: alerts/conflict branches resolved, strays found, moved, merged, archived, contradictions found.
-10. Push: `scripts/sync.sh push` or `scripts\sync.ps1 push`.
+9. Log the run: append `- YYYY-MM-DD <host>` to `archive/consolidate-log.md` (create if missing). Sync's pull-time "consolidate memory" nudge reads the last date in this file — skipping this step breaks the reminder for every machine.
+10. Report in a few lines: alerts/conflict branches resolved, strays found, moved, merged, archived, contradictions found.
+11. Push: `scripts/sync.sh push` or `scripts\sync.ps1 push`.

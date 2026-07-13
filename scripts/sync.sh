@@ -26,7 +26,29 @@ STATEFILE=".git/engram-state"
 ALERTFILE="ALERT.md"
 READONLY_MARKER=".git/engram-readonly"
 STALE_SECS=300
-ALLOWLIST="index.md projects global inbox archive"
+NUDGE_DAYS=7
+
+# §3 commit allowlist: read from scripts/sync-paths.conf (one path per line,
+# '#' comments). The conf lives under scripts/ = code, so changing WHAT syncs
+# still requires a deliberate manual commit. Absolute paths and '..' entries
+# are ignored; missing/empty conf falls back to the built-in default.
+ALLOWLIST_DEFAULT="index.md projects global inbox archive"
+ALLOWLIST_CONF="scripts/sync-paths.conf"
+load_allowlist() {
+  local raw="" p out=""
+  if [ -f "$ALLOWLIST_CONF" ]; then
+    raw="$(sed 's/#.*//' "$ALLOWLIST_CONF" 2>/dev/null)"
+  fi
+  for p in $raw; do
+    case "$p" in
+      /*|*..*) continue ;;
+    esac
+    out="$out $p"
+  done
+  ALLOWLIST="${out# }"
+  [ -n "$ALLOWLIST" ] || ALLOWLIST="$ALLOWLIST_DEFAULT"
+}
+load_allowlist
 
 # ---------------------------------------------------------------------------
 # §1 guards — apply to every remote git operation
@@ -115,6 +137,26 @@ self_heal_rebase() {
 self_heal_rebase
 
 # ---------------------------------------------------------------------------
+# §4 step 0 (both modes) — a node with no 'origin' remote cannot sync at all.
+# That is a standing configuration failure, not a transient one: warn loudly
+# (stdout lands in the session context via the SessionStart hook), record err,
+# and stop. Silence here would be exactly the "silently diverges" failure the
+# contract forbids.
+# ---------------------------------------------------------------------------
+if ! git remote get-url origin >/dev/null 2>&1; then
+  cat <<'EOF'
+[engram] NOT CONNECTED: this memory repo has no 'origin' remote, so nothing
+syncs to or from your other machines. Facts saved here stay on this machine
+only. Fix it once: create a private GitHub repo, then run
+    git remote add origin <your-private-repo-url>
+from the repo root and re-run sync — or run scripts/setup.sh for a guided setup.
+EOF
+  set_state_err "no origin remote configured"
+  [ -f "$ALERTFILE" ] && cat "$ALERTFILE" 2>/dev/null
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
 # §6 skills refresh — real directories only, never symlinks/junctions (Claude
 # Code's skill discovery does not follow them and will silently fail to load).
 # ---------------------------------------------------------------------------
@@ -144,6 +186,16 @@ escalate() {
   rc=$?
   {
     printf '# Engram sync ALERT\n\n'
+    if [ "$rc" -eq 0 ]; then
+      printf '**Your memory could not sync — but nothing is lost.** This machine'\''s\n'
+      printf 'changes are parked safely on the hub. To fix it, open Claude Code and\n'
+      printf 'say: "consolidate memory".\n\n'
+    else
+      printf '**Your memory could not sync, and parking the changes on the hub also\n'
+      printf 'failed — they exist only on this machine right now.** Nothing is\n'
+      printf 'deleted. Check your internet connection / git login, then re-run sync.\n\n'
+    fi
+    printf 'Details (for the fix):\n\n'
     printf -- '- node: %s\n' "$HOST"
     printf -- '- time: %s\n' "$(iso_now)"
     printf -- '- reason: %s\n\n' "$reason"
@@ -185,6 +237,10 @@ do_pull_rebase() {
 scan_secrets() {
   local added
   added="$(git diff --cached -U0 --text 2>/dev/null | grep -E '^\+' | grep -Ev '^\+\+\+')"
+  # §7 false-positive escape hatch: a line tagged 'engram:not-a-secret' is
+  # excluded from the scan. The sanctioned path for already-redacted text —
+  # the alternative is people learning to bypass the scan entirely.
+  added="$(printf '%s\n' "$added" | grep -v 'engram:not-a-secret')"
   [ -n "$added" ] || return 0
 
   local labels=(
@@ -225,19 +281,45 @@ write_secret_alert() {
   local labels="$1"
   {
     printf '# Engram sync ALERT\n\n'
+    printf '**Upload stopped: something that looks like a password or key was found\n'
+    printf 'in your changes.** Nothing was uploaded and nothing is lost — the change\n'
+    printf 'is still in your files, just not synced yet.\n\n'
+    printf 'Details (for the fix):\n\n'
     printf -- '- node: %s\n' "$HOST"
     printf -- '- time: %s\n' "$(iso_now)"
     printf -- '- reason: secret scan matched staged changes; commit refused\n\n'
     printf 'Patterns matched:\n'
     printf '%s\n' "$labels" | sed '/^$/d; s/^/- /'
     printf '\nThe change was NOT committed and remains unstaged in your working tree.\n'
-    printf 'Remove the secret, then re-run: scripts/sync.sh push\n'
+    printf 'To fix, open the file and either:\n\n'
+    printf -- '- remove the secret (real secrets never belong in memory), or\n'
+    printf -- '- if the line is a false alarm (e.g. already-redacted text), append\n'
+    printf '  `<!-- engram:not-a-secret -->` to that exact line.\n\n'
+    printf 'Then re-run: scripts/sync.sh push (Windows: scripts\\sync.ps1 push).\n'
+    printf 'Never work around this scan by committing manually.\n'
   } > "$ALERTFILE" 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
 # §4 modes
 # ---------------------------------------------------------------------------
+# Maintenance nudge: the consolidate skill appends "- YYYY-MM-DD <host>" to
+# archive/consolidate-log.md on every run (synced — the newest date is
+# cluster-wide). Printed on successful pull only: that stdout reaches the
+# session context. No log file = never consolidated = stay quiet (fresh setup).
+consolidate_nudge() {
+  local log="archive/consolidate-log.md" last last_epoch now_epoch age_days
+  [ -f "$log" ] || return 0
+  last="$(grep -Eo '^- [0-9]{4}-[0-9]{2}-[0-9]{2}' "$log" 2>/dev/null | tail -1 | cut -c3-)"
+  [ -n "$last" ] || return 0
+  last_epoch="$(date -u -d "$last" +%s 2>/dev/null)" || return 0
+  now_epoch="$(date -u +%s)"
+  age_days=$(( (now_epoch - last_epoch) / 86400 ))
+  if [ "$age_days" -ge "$NUDGE_DAYS" ]; then
+    printf '[engram] Last memory consolidation was %s days ago — say "consolidate memory" when convenient.\n' "$age_days"
+  fi
+}
+
 if [ "$MODE" = "pull" ]; then
   do_pull_rebase
   case $? in
@@ -245,6 +327,7 @@ if [ "$MODE" = "pull" ]; then
       refresh_skills
       rm -f "$ALERTFILE" 2>/dev/null || true
       set_state_ok
+      consolidate_nudge
       ;;
     1)
       escalate "pull: rebase onto origin/main conflicted"

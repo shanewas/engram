@@ -1,11 +1,58 @@
 #!/usr/bin/env bash
 # engram doctor — health check for one node. Read-only: makes no changes.
-# usage: bash doctor.sh
-# exit 0 = all checks passed. exit 1 = at least one FAIL.
+# usage: bash doctor.sh            full check list (exit 0 = all passed, 1 = a FAIL)
+#        bash doctor.sh --status   short plain-language summary for humans (always exit 0)
 set -u
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || { echo "[FAIL] cannot resolve engram root"; exit 1; }
 cd "$DIR" 2>/dev/null || { echo "[FAIL] cannot cd to $DIR"; exit 1; }
+
+# --- --status: the non-technical view. Plain sentences, no check IDs. ----------
+human_age() {
+  local s="$1"
+  if   [ "$s" -lt 120 ];    then printf 'moments'
+  elif [ "$s" -lt 7200 ];   then printf '%s minutes' "$((s/60))"
+  elif [ "$s" -lt 172800 ]; then printf '%s hours' "$((s/3600))"
+  else                           printf '%s days' "$((s/86400))"
+  fi
+}
+
+if [ "${1:-}" = "--status" ]; then
+  echo "Engram memory status — $DIR"
+  echo
+  now_epoch="$(date -u +%s)"
+
+  if [ -f "ALERT.md" ]; then
+    echo "⚠️  Needs attention: a sync problem is flagged on this machine."
+    echo "   Nothing is lost. Open Claude Code and say \"consolidate memory\"."
+  elif [ -f ".git/engram-state" ]; then
+    read -r kind ts _reason < .git/engram-state 2>/dev/null || kind=""
+    ts_epoch="$(date -u -d "${ts:-}" +%s 2>/dev/null)" || ts_epoch=0
+    age=$(( now_epoch - ts_epoch ))
+    if [ "$kind" = "ok" ] && [ "$ts_epoch" -gt 0 ] && [ "$age" -le 5400 ]; then
+      echo "✅ Healthy. This machine last synced $(human_age "$age") ago."
+    elif [ "$kind" = "ok" ]; then
+      echo "⚠️  This machine last synced $(human_age "$age") ago — longer than expected."
+      echo "   Try: bash scripts/sync.sh push   (then run doctor again)"
+    else
+      echo "⚠️  The last sync attempt failed. Run: bash scripts/doctor.sh   for details."
+    fi
+  else
+    echo "⚠️  Sync has never run on this machine — it is not connected yet."
+    echo "   Run: bash scripts/setup.sh   for a guided setup."
+  fi
+
+  echo
+  echo "Machines seen in recent sync history:"
+  git log --format='%s|%ct' -200 2>/dev/null | awk -F'|' -v now="$now_epoch" '
+    $1 ~ /^sync\(/ {
+      host = $1; sub(/^sync\(/, "", host); sub(/\).*/, "", host)
+      if (!(host in seen)) { seen[host] = 1; printf "  - %s: %d\n", host, now - $2 }
+    }' | while IFS=': ' read -r dash host secs; do
+      printf '  %s %s last synced %s ago\n' "$dash" "$host" "$(human_age "${secs:-0}")"
+    done
+  exit 0
+fi
 
 FAILURES=0
 pass() { printf '[PASS] %s\n' "$1"; }
@@ -32,11 +79,22 @@ if [ -n "$ORIGIN_URL" ]; then
   pass "origin configured: $ORIGIN_URL"
   if timeout 15 git -c credential.interactive=false -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=15 ls-remote --exit-code origin >/dev/null 2>&1; then
     pass "origin reachable (git ls-remote)"
+    # a hub with no main branch means this repo has NEVER been pushed: every
+    # memory written so far exists on this machine only. Loud failure, not info.
+    if timeout 15 git -c credential.interactive=false -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=15 ls-remote --exit-code origin main >/dev/null 2>&1; then
+      pass "hub has a main branch (repo has been pushed at least once)"
+      ahead="$(git rev-list --count origin/main..HEAD 2>/dev/null)" || ahead=""
+      if [ -n "$ahead" ] && [ "$ahead" -gt 0 ]; then
+        warn "this node is $ahead commit(s) ahead of origin/main — a sync push should drain this; if it persists, run consolidate"
+      fi
+    else
+      fail "hub has NO main branch — this repo has never been pushed; memory is NOT backed up (run a sync push, or scripts/setup.sh)"
+    fi
   else
     fail "origin NOT reachable (git ls-remote failed or timed out)"
   fi
 else
-  fail "origin: no remote named 'origin' configured"
+  fail "origin: no remote named 'origin' configured — memory stays on this machine only (run scripts/setup.sh)"
 fi
 
 # 2. CLAUDE.md import -----------------------------------------------------------

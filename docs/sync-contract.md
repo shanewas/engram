@@ -45,23 +45,27 @@ http.lowSpeedTime=15
 |---|---|
 | `.git/engram-state` | `ok <iso8601>` or `err <iso8601> <reason>` — last sync outcome |
 | `ALERT.md` | repo root, **gitignored**, local-only. Its existence means this node needs human/model attention. |
+| `scripts/sync-paths.conf` | the commit allowlist — one path per line, `#` comments |
+| `archive/consolidate-log.md` | appended by the `consolidate` skill (`- YYYY-MM-DD <host>` per run); drives the maintenance nudge (§4 pull) |
 
-Commit allowlist — nothing else is ever staged:
+Commit allowlist — nothing else is ever staged. Read from `scripts/sync-paths.conf` (one path per line, relative to the repo root, `#` starts a comment); entries that are absolute or contain `..` are ignored. If the conf is missing or yields no entries, the built-in default applies — which is the same list the shipped conf contains:
 
 ```
 index.md  projects/  global/  inbox/  archive/
 ```
 
-Changes to `scripts/`, `CLAUDE.md`, `PLAN.md`, `docs/`, `.claude/` are *code*, not memory: they require a deliberate manual commit. `consolidate` surfaces untracked strays.
+The conf itself lives under `scripts/` and is therefore *code*: changing what syncs always requires a deliberate manual commit. Changes to `scripts/`, `CLAUDE.md`, `PLAN.md`, `docs/`, `.claude/` are likewise code, not memory: they require a deliberate manual commit. `consolidate` surfaces untracked strays.
 
 ## 4. Modes
+
+**Step 0, both modes** (after lock + self-heal): no `origin` remote configured → print a plain-language NOT CONNECTED warning to stdout (the SessionStart hook injects it into the session context), state = err (`no origin remote configured`), then skip to the final alert-print step and exit 0. A node with no remote is a standing configuration failure — it must never sit quiet while memory accumulates locally.
 
 ### `pull`
 
 1. Acquire lock (held → exit 0).
 2. Self-heal: if `.git/rebase-merge` or `.git/rebase-apply` exists → `git rebase --abort`.
 3. `git pull --rebase --autostash` (guarded).
-   - success → refresh skills (§6); delete `ALERT.md`; state = ok.
+   - success → refresh skills (§6); delete `ALERT.md`; state = ok; **maintenance nudge**: if `archive/consolidate-log.md` exists and its last `- YYYY-MM-DD` entry is ≥ 7 days old, print a one-line "say consolidate memory" reminder to stdout. No log file → no nudge.
    - conflict → `git rebase --abort`; **escalate** (§5).
    - network/auth failure → state = err. No escalation (transient; not divergence).
 4. If `ALERT.md` exists, **print its contents to stdout**. SessionStart hook stdout is injected into the session context — this is how the model itself learns the node is broken.
@@ -84,7 +88,7 @@ Changes to `scripts/`, `CLAUDE.md`, `PLAN.md`, `docs/`, `.claude/` are *code*, n
 Triggered when a rebase conflicts or a push is rejected — i.e. whenever this node holds commits it cannot get to `origin/main`.
 
 1. `git push --force origin HEAD:conflict/<host>` (guarded). This is a per-host scratch branch, always safe to force. **No local-only commit is ever stranded** — the work is on the hub even when main is blocked.
-2. Write `ALERT.md` stating: what failed, that `conflict/<host>` holds this node's commits, and that `consolidate` must merge and delete it.
+2. Write `ALERT.md` stating: what failed, that `conflict/<host>` holds this node's commits, and that `consolidate` must merge and delete it. Every ALERT (this one and §7's) MUST open with a plain-language paragraph a non-technical reader can act on: nothing is lost, and the fix is saying "consolidate memory" (or, for §7, redact / mark the line). Technical detail follows below it.
 3. State = err.
 
 Rationale: the failure is routed to the operator, and the operator is the model. `index.md` (always loaded) carries the standing instruction to act on `ALERT.md`; the pull hook prints it into context. A memory system that silently stops syncing while the user keeps writing to it is worse than one that loudly fails.
@@ -110,6 +114,8 @@ eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.  JWT
 ```
 
 The allowlist bounds *which files* sync; the scan catches a secret pasted *into* an allowed `.md`. Both are needed.
+
+**False-positive escape hatch:** an added line containing the literal marker `engram:not-a-secret` (conventionally as `<!-- engram:not-a-secret -->`) is excluded from the scan. This is the ONLY sanctioned way past a false positive — e.g. already-redacted text like `token: cfat_[REDACTED]` that still matches the generic pattern. The secret ALERT must name the marker so the operator (usually the model) marks the line instead of learning to bypass the scan; committing around the scan manually is forbidden.
 
 ## 8. Hook wiring
 
