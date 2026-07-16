@@ -10,7 +10,7 @@ Cross-machine memory system for Claude Code. Markdown in git; a private git hub 
 - `inbox/` — append-only quick captures (`YYYY-MM.md`), merged out by the consolidate skill.
 - `archive/` — dead projects, compressed history.
 - `scripts/` — sync + node setup; `setup.sh`/`setup.ps1` are the interactive wizards, `sync-paths.conf` is the commit allowlist (code — changing it needs a manual commit).
-- `.claude/skills/` — `remember`, `consolidate`, `migrate`; setup scripts copy these into `~/.claude/skills` so they work in every project.
+- `plugins/engram/skills/` — `remember`, `consolidate`, `migrate`; setup scripts copy these into `~/.claude/skills` so they work in every project.
 - `AGENTS.md` — standing rules for non-Claude agents joining the memory; `SETUP-PROMPT.md` — paste-into-Claude installer; `docs/roadmap.md` — improvement plan + status.
 
 ## Rules

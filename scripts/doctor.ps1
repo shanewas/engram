@@ -166,7 +166,7 @@ if ($settingsValid) {
 }
 
 # 5. skills are real dirs (not symlinks/junctions), each with SKILL.md -------------
-$skillsSrc = Join-Path $repo '.claude\skills'
+$skillsSrc = Join-Path $repo 'plugins\engram\skills'
 if (Test-Path $skillsSrc) {
     Get-ChildItem -Path $skillsSrc -Directory | ForEach-Object {
         $name   = $_.Name
@@ -185,7 +185,7 @@ if (Test-Path $skillsSrc) {
         }
     }
 } else {
-    Test-Warn "no .claude/skills directory in repo - nothing to check"
+    Test-Warn "no plugins/engram/skills directory in repo - nothing to check"
 }
 
 # 6. scheduled task -----------------------------------------------------------------

@@ -1,0 +1,18 @@
+{
+  "name": "engram-tools",
+  "description": "Engram — cross-machine memory for Claude Code",
+  "owner": {
+    "name": "shanewas"
+  },
+  "plugins": [
+    {
+      "name": "engram",
+      "source": "./plugins/engram",
+      "description": "Cross-machine memory: remember/consolidate/migrate skills plus automatic git-sync session hooks. Facts live in a private git repo you own.",
+      "version": "1.0.0",
+      "repository": "https://github.com/shanewas/engram",
+      "license": "MIT",
+      "keywords": ["memory", "persistent-memory", "git-sync", "cross-machine"]
+    }
+  ]
+}

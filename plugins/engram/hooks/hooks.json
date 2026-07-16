@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"${ENGRAM_HOME:-$HOME/engram}/scripts/sync.sh\"; [ -f \"$f\" ] && bash \"$f\" pull || true",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"${ENGRAM_HOME:-$HOME/engram}/scripts/sync.sh\"; [ -f \"$f\" ] && setsid nohup bash \"$f\" push >/dev/null 2>&1 &",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

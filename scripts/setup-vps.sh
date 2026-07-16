@@ -122,8 +122,8 @@ echo "[engram] hooks merged -> $SET"
 
 # --- 4. skills: COPY as real directories, never symlink ------------------------
 mkdir -p "$HOME/.claude/skills"
-if [ -d "$DIR/.claude/skills" ]; then
-  for s in "$DIR/.claude/skills"/*/; do
+if [ -d "$DIR/plugins/engram/skills" ]; then
+  for s in "$DIR/plugins/engram/skills"/*/; do
     [ -d "$s" ] || continue
     name="$(basename "$s")"
     target="$HOME/.claude/skills/$name"
