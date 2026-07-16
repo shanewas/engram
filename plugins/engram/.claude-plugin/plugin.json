@@ -1,0 +1,15 @@
+{
+  "name": "engram",
+  "description": "Cross-machine memory for Claude Code. Skills write facts to a git repo you own; session hooks sync it across machines.",
+  "version": "1.0.0",
+  "author": {
+    "name": "shanewas"
+  },
+  "homepage": "https://github.com/shanewas/engram",
+  "repository": "https://github.com/shanewas/engram",
+  "license": "MIT",
+  "keywords": ["memory", "persistent-memory", "git-sync"],
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "hooks": "./hooks/hooks.json"
+}

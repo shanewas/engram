@@ -8,7 +8,7 @@ Cross-machine memory for Claude Code and other coding agents. Facts live as plai
 - **`index.md` is loaded into every Claude Code session** (via `@import` in `~/.claude/CLAUDE.md`). It is a routing table, kept under 100 lines: it tells Claude what memory exists and where. Detail files (`projects/<name>.md`, `global/*.md`) are read lazily during the session.
 - **Sync is automatic.** A SessionStart hook pulls, a SessionEnd hook pushes, and a 30-minute cron/scheduled task pushes as the durability backstop. Sync never blocks a session and never prompts for credentials (see [`docs/sync-contract.md`](docs/sync-contract.md)).
 - **An allowlist bounds what syncs.** Only paths listed in `scripts/sync-paths.conf` (default: `index.md`, `projects/`, `global/`, `inbox/`, `archive/`) are ever auto-committed. Scripts, docs, and config require a deliberate manual commit.
-- **Skills do the writing.** `remember` routes a fact to the right file, `consolidate` does weekly maintenance, `migrate` imports pre-existing CLAUDE.md memory. They live in [`.claude/skills/`](.claude/skills/) and are copied to `~/.claude/skills` on setup and on every pull.
+- **Skills do the writing.** `remember` routes a fact to the right file, `consolidate` does weekly maintenance, `migrate` imports pre-existing CLAUDE.md memory. They live in [`plugins/engram/skills/`](plugins/engram/skills/) and are copied to `~/.claude/skills` on setup and on every pull (or loaded directly when installed as a plugin).
 
 ## Requirements
 
@@ -21,6 +21,18 @@ Cross-machine memory for Claude Code and other coding agents. Facts live as plai
 ## Install
 
 Your memories live in a private repo, not in this one. First machine: clone this template, push it to your private hub. Every other machine: clone the private hub.
+
+> Upgrading an existing hub from before the plugin: the skills moved from `.claude/skills/` to `plugins/engram/skills/`. A normal template pull brings both, so sync keeps working — just don't cherry-pick only `scripts/`.
+
+**As a Claude Code plugin (skills + sync hooks):**
+
+```
+/plugin marketplace add shanewas/engram
+/plugin install engram@engram-tools
+/engram-setup git@github.com:<you>/my-engram.git
+```
+
+The plugin ships the skills and the SessionStart/SessionEnd sync hooks; `/engram-setup` clones your hub repo, wires `index.md` into your session, and removes any hooks a prior script install left behind. It does not install the 30-minute background cron — for an always-on headless box, also run the script setup below. The rest of this section is the script-based install, which does the same wiring without the plugin.
 
 **One line (Linux/macOS):**
 

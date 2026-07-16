@@ -111,7 +111,7 @@ function Repair-Rebase {
 # (Claude Code's skill discovery does not follow links and silently fails to load them.)
 function Update-Skills {
     if (-not $env:USERPROFILE) { return }
-    $src = Join-Path $repo '.claude\skills'
+    $src = Join-Path $repo 'plugins\engram\skills'
     if (-not (Test-Path $src)) { return }
     $dstRoot = Join-Path $env:USERPROFILE '.claude\skills'
     New-Item -ItemType Directory -Force -Path $dstRoot 2>$null | Out-Null

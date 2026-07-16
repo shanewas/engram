@@ -162,7 +162,7 @@ fi
 # ---------------------------------------------------------------------------
 refresh_skills() {
   [ -n "${HOME:-}" ] || return 0
-  local src="$DIR/.claude/skills" dst="$HOME/.claude/skills"
+  local src="$DIR/plugins/engram/skills" dst="$HOME/.claude/skills"
   [ -d "$src" ] || return 0
   mkdir -p "$dst" 2>/dev/null || return 0
   local d name

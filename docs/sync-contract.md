@@ -95,7 +95,7 @@ Rationale: the failure is routed to the operator, and the operator is the model.
 
 ## 6. Skills refresh
 
-`~/.claude/skills` **must contain real directories, not symlinks/junctions** — Claude Code's skill discovery does not follow them (it will silently fail to load). Setup copies `.claude/skills/*` there; every successful `pull` re-copies, so a skill edited on one machine propagates to the others.
+`~/.claude/skills` **must contain real directories, not symlinks/junctions** — Claude Code's skill discovery does not follow them (it will silently fail to load). Setup copies `plugins/engram/skills/*` there; every successful `pull` re-copies, so a skill edited on one machine propagates to the others.
 
 ## 7. Secret scan patterns
 

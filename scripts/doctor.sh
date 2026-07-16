@@ -129,8 +129,8 @@ else
 fi
 
 # 4. skills are real dirs (not symlinks), each with SKILL.md --------------------
-if [ -d "$DIR/.claude/skills" ]; then
-  for d in "$DIR/.claude/skills"/*/; do
+if [ -d "$DIR/plugins/engram/skills" ]; then
+  for d in "$DIR/plugins/engram/skills"/*/; do
     [ -d "$d" ] || continue
     name="$(basename "$d")"
     target="${HOME:-}/.claude/skills/$name"
@@ -143,7 +143,7 @@ if [ -d "$DIR/.claude/skills" ]; then
     fi
   done
 else
-  warn "no .claude/skills directory in repo — nothing to check"
+  warn "no plugins/engram/skills directory in repo — nothing to check"
 fi
 
 # 5. cron ------------------------------------------------------------------------
