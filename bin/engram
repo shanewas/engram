@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# engram — one command to control your shared memory.
+# Wraps the existing scripts (sync.sh, doctor.sh, setup.sh) and adds the verbs
+# that used to require hand-editing files: paths/include/exclude/audit/remember.
+#
+# Resolve repo root: $ENGRAM_HOME, else the repo this script lives in, else ~/engram.
+set -u
+
+_resolve_root() {
+  if [ -n "${ENGRAM_HOME:-}" ] && [ -d "$ENGRAM_HOME/.git" ]; then echo "$ENGRAM_HOME"; return; fi
+  local self; self="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
+  if [ -d "$self/.git" ]; then echo "$self"; return; fi
+  if [ -d "$HOME/engram/.git" ]; then echo "$HOME/engram"; return; fi
+  echo ""; return 1
+}
+ROOT="$(_resolve_root)" || { echo "engram: no repo found (set ENGRAM_HOME or clone to ~/engram)"; exit 1; }
+cd "$ROOT" || exit 1
+CONF="scripts/sync-paths.conf"
+SYNCED="index.md projects global inbox archive"   # fallback if conf unreadable
+
+_allowlist() {
+  if [ -f "$CONF" ]; then sed 's/#.*//' "$CONF" | tr -s ' \t\n' ' ' | sed 's/^ //;s/ $//'; else echo "$SYNCED"; fi
+}
+
+cmd_status() {
+  local branch ahead behind dirty alert last
+  branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+  git fetch -q origin 2>/dev/null || true
+  ahead="$(git rev-list --count @{u}..HEAD 2>/dev/null || echo '?')"
+  behind="$(git rev-list --count HEAD..@{u} 2>/dev/null || echo '?')"
+  dirty="$(git status --porcelain -- $(_allowlist) 2>/dev/null | wc -l | tr -d ' ')"
+  last="$(git log -1 --format='%cr (%h)' 2>/dev/null)"
+  echo "engram @ $ROOT"
+  echo "  branch:      $branch"
+  echo "  last commit: $last"
+  echo "  unpushed:    $ahead   behind remote: $behind"
+  echo "  uncommitted: $dirty file(s) in synced paths"
+  echo "  syncs:       $(_allowlist)"
+  if [ -f ALERT.md ]; then echo "  ⚠️  ALERT.md present — run: engram doctor, then resolve (see projects/engram.md)"; fi
+}
+
+cmd_paths() {
+  echo "Synced (in $CONF):"; for p in $(_allowlist); do echo "  ✓ $p"; done
+  # tracked but NOT in allowlist = committed once but won't auto-sync; worth surfacing
+  local tracked_top; tracked_top="$(git -c core.quotepath=false ls-files 2>/dev/null | sed 's#/.*##' | sort -u)"
+  local al=" $(_allowlist) "
+  echo "Tracked but NOT auto-synced (need manual commit):"
+  local any=0
+  while read -r t; do
+    [ -z "$t" ] && continue
+    case "$al" in *" $t "*) ;; *) echo "  · $t"; any=1;; esac
+  done <<< "$tracked_top"
+  [ "$any" -eq 0 ] && echo "  (none)"
+  return 0
+}
+
+cmd_include() {
+  [ $# -ge 1 ] || { echo "usage: engram include <path> [path...]"; return 1; }
+  for p in "$@"; do
+    case "$p" in /*|*..*) echo "  refused (absolute/..): $p"; continue;; esac
+    if grep -qxF "$p" "$CONF" 2>/dev/null; then echo "  already synced: $p"; else echo "$p" >> "$CONF"; echo "  + now syncs: $p"; fi
+  done
+  echo "note: $CONF is code, not memory — commit it to apply on all nodes:"
+  echo "      git -C $ROOT add $CONF && git -C $ROOT commit -m 'sync: include' && git -C $ROOT push"
+}
+
+cmd_exclude() {
+  [ $# -ge 1 ] || { echo "usage: engram exclude <path> [path...]"; return 1; }
+  local tmp; tmp="$(mktemp)"
+  cp "$CONF" "$tmp"
+  for p in "$@"; do
+    if grep -qxF "$p" "$tmp"; then grep -vxF "$p" "$tmp" > "$tmp.2" && mv "$tmp.2" "$tmp"; echo "  - no longer syncs: $p (existing commits stay in history)"; else echo "  not in allowlist: $p"; fi
+  done
+  mv "$tmp" "$CONF"
+  echo "note: commit $CONF to apply everywhere (see 'engram include' output)."
+}
+
+cmd_audit() {
+  local n="${1:-20}"
+  echo "Last $n memory changes (who / when / what):"
+  git log -n "$n" --no-merges --format='%C(auto)%h%Creset  %ci  %s' -- $(_allowlist) 2>/dev/null \
+    | sed 's/^/  /'
+  echo
+  echo "Full diff of any change:  git -C $ROOT show <hash>"
+  echo "Blame a fact:             git -C $ROOT log -p -S '<text>' -- projects global"
+}
+
+cmd_remember() {
+  [ $# -ge 1 ] || { echo "usage: engram remember <text>"; return 1; }
+  local month file line
+  month="$(date +%Y-%m)"; file="inbox/${month}.md"
+  line="- $(date +%Y-%m-%d) — $*"
+  mkdir -p inbox
+  [ -f "$file" ] || printf '# Inbox %s\n\n' "$month" > "$file"
+  printf '%s\n' "$line" >> "$file"
+  echo "captured → $file"
+  echo "  $line"
+  echo "(quick capture. For smart routing to a project/global file, use the 'remember' skill in Claude.)"
+}
+
+cmd_sync()   { bash scripts/sync.sh pull; bash scripts/sync.sh push; }
+cmd_pull()   { bash scripts/sync.sh pull "$@"; }
+cmd_push()   { bash scripts/sync.sh push "$@"; }
+cmd_doctor() { bash scripts/doctor.sh "$@"; }
+cmd_setup()  { bash scripts/setup.sh "$@"; }
+cmd_restore(){ echo "Disaster recovery: $ROOT/restore/README.md"; [ -f restore/README.md ] && sed -n '1,24p' restore/README.md; }
+
+cmd_help() {
+  cat <<EOF
+engram — control your shared memory (repo: $ROOT)
+
+  engram status            repo state: sync position, uncommitted, alerts
+  engram sync              pull then push (safe: never blocks, conflicts branch off)
+  engram pull | push       one direction
+  engram paths             what syncs, and what's tracked but won't auto-sync
+  engram include <path>    start syncing a path (then commit sync-paths.conf)
+  engram exclude <path>    stop syncing a path
+  engram audit [N]         last N memory changes, attributed and diffable
+  engram remember <text>   quick-capture a fact to this month's inbox
+  engram doctor [--status] health check (--status = plain-language)
+  engram setup             wire this machine (interactive)
+  engram restore           show the disaster-recovery runbook
+  engram help
+
+Everything is git underneath: every change is a commit — attributed, diffable,
+revertible. That IS the audit log. 'engram audit' just makes it readable.
+EOF
+}
+
+main() {
+  local c="${1:-help}"; shift || true
+  case "$c" in
+    status)   cmd_status "$@";;
+    sync)     cmd_sync "$@";;
+    pull)     cmd_pull "$@";;
+    push)     cmd_push "$@";;
+    paths)    cmd_paths "$@";;
+    include)  cmd_include "$@";;
+    exclude)  cmd_exclude "$@";;
+    audit)    cmd_audit "$@";;
+    remember) cmd_remember "$@";;
+    doctor)   cmd_doctor "$@";;
+    setup)    cmd_setup "$@";;
+    restore)  cmd_restore "$@";;
+    help|-h|--help) cmd_help;;
+    *) echo "engram: unknown command '$c'"; echo; cmd_help; exit 1;;
+  esac
+}
+main "$@"
