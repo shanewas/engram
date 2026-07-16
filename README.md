@@ -79,6 +79,34 @@ You mostly don't do anything — Claude reads and writes memory on its own. The 
 
 Want to sync by hand right now? `scripts\sync.ps1 push` (Windows) or `./scripts/sync.sh push` (Linux).
 
+## The `engram` command
+
+On Linux/macOS, one command wraps everything (put it on your PATH — `scripts/bootstrap.sh` does that for you):
+
+| Command | What it does |
+|---|---|
+| `engram status` | Where this machine stands: synced or not, uncommitted changes, alerts |
+| `engram sync` | Pull then push now (never blocks; conflicts park safely) |
+| `engram paths` | What syncs — and what's tracked but deliberately not syncing |
+| `engram include <folder>` / `exclude <folder>` | Change which folders sync, without editing config by hand |
+| `engram audit [N]` | The last N memory changes — who, when, what — each one diffable and revertible |
+| `engram remember <text>` | Jot a quick fact into this month's inbox from the terminal |
+| `engram doctor [--status]` | Health check |
+| `engram restore` | Disaster-recovery steps |
+
+Two ideas hold the whole system together:
+
+- **Your audit log is just git.** Every fact is a commit — attributed, timestamped, revertible with `git revert`. `engram audit` only makes the log readable; there's no separate audit system to trust or maintain.
+- **Your access control is just the allowlist.** Only folders listed in `scripts/sync-paths.conf` ever leave a machine. `engram include`/`exclude` are the knobs, and that file is itself versioned — so who-changed-what-when applies to the rules too.
+
+**New machine, one line** (Linux/macOS) — clone, wire, and put `engram` on PATH in one step:
+
+```
+curl -fsSL https://raw.githubusercontent.com/<you>/my-engram/main/scripts/bootstrap.sh | bash -s -- git@github.com:<you>/my-engram.git
+```
+
+(That raw-`curl` link only works if your hub repo is public. Most people's hubs are private — in that case clone it first, then run `bash scripts/bootstrap.sh` from inside.)
+
 ## Where things live
 
 | Folder / file | What's in it |
@@ -89,6 +117,8 @@ Want to sync by hand right now? `scripts\sync.ps1 push` (Windows) or `./scripts/
 | `inbox/` | Quick captures, filed properly at the next tidy-up |
 | `archive/` | Old projects and compressed history |
 | `scripts/` | Setup and sync scripts (incl. `sync-paths.conf` — the list of folders that sync) |
+| `bin/engram` | The `engram` command (Linux/macOS) |
+| `restore/` | Disaster-recovery notes |
 | `.claude/skills/` | The `remember`, `consolidate`, and `migrate` skills |
 
 ## Is my data safe?
