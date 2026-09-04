@@ -262,6 +262,10 @@ if (Test-Path $indexPath) {
     }
 }
 
+Write-Host "--- dotfiles ---"
+& python -X utf8 (Join-Path $PSScriptRoot "dotfiles.py") doctor
+if ($LASTEXITCODE -ne 0) { $failures++ }
+
 Write-Host ""
 if ($failures -gt 0) {
     Write-Host "engram doctor: $failures check(s) FAILED"

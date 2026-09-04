@@ -103,6 +103,7 @@ cmd_pull()   { bash scripts/sync.sh pull "$@"; }
 cmd_push()   { bash scripts/sync.sh push "$@"; }
 cmd_doctor() { bash scripts/doctor.sh "$@"; }
 cmd_setup()  { bash scripts/setup.sh "$@"; }
+cmd_dotfiles(){ local py; py="$(command -v python3 || command -v python)"; [ -n "$py" ] || { echo "engram: python not found"; return 1; }; "$py" scripts/dotfiles.py "$@"; }
 cmd_restore(){ echo "Disaster recovery: $ROOT/restore/README.md"; [ -f restore/README.md ] && sed -n '1,24p' restore/README.md; }
 
 cmd_help() {
@@ -120,6 +121,7 @@ engram — control your shared memory (repo: $ROOT)
   engram doctor [--status] health check (--status = plain-language)
   engram setup             wire this machine (interactive)
   engram restore           show the disaster-recovery runbook
+  engram dotfiles <cmd>    harness config sync: apply | save | doctor (docs/dotfiles.md)
   engram help
 
 Everything is git underneath: every change is a commit — attributed, diffable,
@@ -142,6 +144,7 @@ main() {
     doctor)   cmd_doctor "$@";;
     setup)    cmd_setup "$@";;
     restore)  cmd_restore "$@";;
+    dotfiles) cmd_dotfiles "$@";;
     help|-h|--help) cmd_help;;
     *) echo "engram: unknown command '$c'"; echo; cmd_help; exit 1;;
   esac

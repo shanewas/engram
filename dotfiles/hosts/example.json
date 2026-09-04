@@ -1,0 +1,13 @@
+{
+  "vars": {
+    "example_var": "value used by {{VAR:example_var}}"
+  },
+  "overlay": {
+    "claude/settings.json.tmpl": {
+      "hooks": {
+        "SessionStart": []
+      }
+    }
+  },
+  "append": {}
+}
