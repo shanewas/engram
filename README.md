@@ -87,13 +87,15 @@ From the terminal (`bin/engram`, Linux/macOS only):
 | `engram remember <text>` | quick-capture a dated bullet into `inbox/YYYY-MM.md` |
 | `engram doctor [--status]` | health check; `--status` is a plain-language summary |
 | `engram setup` / `restore` | interactive setup; show the disaster-recovery runbook |
+| `engram dotfiles apply` / `save` / `doctor` | sync harness config (settings, hooks, rules, plugin lists) next to memory — [`docs/dotfiles.md`](docs/dotfiles.md) |
 
-Windows equivalents: `scripts\sync.ps1`, `scripts\doctor.ps1` — there is no `engram` CLI on Windows.
+Windows equivalents: `scripts\sync.ps1`, `scripts\doctor.ps1`, `python -X utf8 scripts\dotfiles.py` — there is no `engram` CLI on Windows.
 
 ## Configuration
 
 - **`scripts/sync-paths.conf`** is the sync allowlist: one path per line, `#` comments. Nothing outside it is ever auto-committed. The file itself is treated as code — changing it requires a manual commit, so the rules are versioned like everything else.
 - **Read-only nodes:** setup with `--read-only` (or answer "read only" in the wizard) creates `.git/engram-readonly`; `push` degrades to `pull` on that machine.
+- **Harness config:** `dotfiles/` holds templated copies of `~/.claude/settings.json`, `CLAUDE.md`, rules, hooks and install lists. It is outside the allowlist on purpose: `dotfiles.py apply` runs at session start, `dotfiles.py save` captures local edits for a manual commit, and a per-file hash guard never overwrites an unsaved local edit. Secrets stay in `~/.config/dotfiles/secrets.env` behind `{{SECRET:NAME}}` placeholders. Needs Python 3.8+. Details: [`docs/dotfiles.md`](docs/dotfiles.md).
 - **Repo location:** `~/engram` by default, overridable with `ENGRAM_HOME`. Avoid OneDrive/Dropbox-synced folders.
 
 ## Data safety and failure modes

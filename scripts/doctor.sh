@@ -208,6 +208,10 @@ if [ -f "$DIR/index.md" ]; then
   fi
 fi
 
+echo "--- dotfiles ---"
+PY="$(command -v python3 || command -v python || true)"
+if [ -n "$PY" ]; then "$PY" "$(dirname "$0")/dotfiles.py" doctor || FAILURES=$((FAILURES+1)); else echo "SKIP python not found"; fi
+
 echo
 if [ "$FAILURES" -gt 0 ]; then
   echo "engram doctor: $FAILURES check(s) FAILED"

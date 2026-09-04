@@ -7,6 +7,11 @@
             "type": "command",
             "command": "f=\"${ENGRAM_HOME:-$HOME/engram}/scripts/sync.sh\"; [ -f \"$f\" ] && bash \"$f\" pull || true",
             "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "f=\"${ENGRAM_HOME:-$HOME/engram}/scripts/dotfiles.py\"; [ -f \"$f\" ] && { command -v python3 >/dev/null && python3 \"$f\" apply || python \"$f\" apply; } || true",
+            "timeout": 60
           }
         ]
       }

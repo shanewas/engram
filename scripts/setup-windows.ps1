@@ -182,8 +182,9 @@ if ($NoTask) {
         Write-Host "[engram] -NoTask: no scheduled task present"
     }
 } else {
-    $action  = New-ScheduledTaskAction -Execute 'powershell.exe' `
-        -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$syncPs1`" push"
+    $hiddenVbs = Join-Path $repo 'scripts\sync-hidden.vbs'
+    $action  = New-ScheduledTaskAction -Execute 'wscript.exe' `
+        -Argument "//nologo `"$hiddenVbs`" push"
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
         -RepetitionInterval (New-TimeSpan -Minutes 30) `
         -RepetitionDuration (New-TimeSpan -Days 3650)
