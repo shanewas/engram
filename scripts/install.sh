@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/<you>/engram-memory/main/scripts/install.sh | bash -s -- [remote-url]
 set -euo pipefail
 
-REMOTE="${1:-https://github.com/shanewas/engram-memory.git}"
+REMOTE="${1:-${ENGRAM_REMOTE:-}}"
 ENGRAM_DIR="${ENGRAM_HOME:-$HOME/engram}"
 
 echo "============================================================"
@@ -24,6 +24,12 @@ fi
 
 # Clone or verify
 if [ ! -d "$ENGRAM_DIR/.git" ]; then
+    if [ -z "$REMOTE" ]; then
+        read -rp "[engram] Enter your private memory git repository URL: " REMOTE
+        if [ -z "$REMOTE" ]; then
+            echo "Error: No repository URL provided."; exit 1
+        fi
+    fi
     echo "[engram] Cloning repository from $REMOTE..."
     git clone "$REMOTE" "$ENGRAM_DIR"
 else

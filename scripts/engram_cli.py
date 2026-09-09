@@ -239,6 +239,63 @@ def cmd_remember(args):
     return 0
 
 
+def cmd_memory(args):
+    """Inspect shared memory index, projects, and storage metrics."""
+    action = getattr(args, 'action', 'status') or 'status'
+    index_file = REPO_ROOT / 'index.md'
+    projects_dir = REPO_ROOT / 'projects'
+    inbox_dir = REPO_ROOT / 'inbox'
+    archive_dir = REPO_ROOT / 'archive'
+
+    if action == 'status':
+        print(f'Engram Memory Metrics (Root: {REPO_ROOT}):\n')
+        if index_file.exists():
+            idx_lines = len(index_file.read_text(encoding='utf-8', errors='replace').splitlines())
+            status_tag = 'PASS' if idx_lines <= 100 else 'WARN (exceeds 100-line budget)'
+            print(f'  {status_tag} index.md: {idx_lines} lines')
+        else:
+            print('  FAIL index.md: missing')
+
+        if projects_dir.exists():
+            proj_files = [p for p in projects_dir.glob('*.md') if not p.name.startswith('_')]
+            print(f'  ✓ projects/: {len(proj_files)} active project(s)')
+        else:
+            print('  - projects/: missing')
+
+        if inbox_dir.exists():
+            inbox_files = list(inbox_dir.glob('*.md'))
+            print(f'  ✓ inbox/: {len(inbox_files)} pending inbox file(s)')
+        else:
+            print('  - inbox/: empty')
+
+        if archive_dir.exists():
+            arch_files = list(archive_dir.glob('*.md'))
+            print(f'  ✓ archive/: {len(arch_files)} archived file(s)')
+
+        print('\nRun "engram memory list" to see all projects and line counts.')
+        return 0
+
+    if action == 'list':
+        if not projects_dir.exists():
+            print('projects/ directory not found.')
+            return 1
+        proj_files = sorted([p for p in projects_dir.glob('*.md') if not p.name.startswith('_')])
+        print(f'Active Projects in Memory ({len(proj_files)}):\n')
+        print(f'{"Project":<22} {"Lines":<8} {"Updated":<14} {"File"}')
+        print('-' * 70)
+        for pf in proj_files:
+            content = pf.read_text(encoding='utf-8', errors='replace')
+            lines = len(content.splitlines())
+            m = re.search(r'Updated:\s*(\d{4}-\d{2}-\d{2})', content)
+            updated = m.group(1) if m else 'unknown'
+            line_warn = ' [!] (>300)' if lines > 300 else ''
+            print(f'{pf.stem:<22} {str(lines) + line_warn:<8} {updated:<14} projects/{pf.name}')
+        return 0
+
+    print(f'Unknown memory action: {action}. Use "status" or "list".')
+    return 1
+
+
 def cmd_connect(args):
     """Connect an agent harness (or all detected) to engram."""
     hm = HarnessManager(REPO_ROOT)
@@ -477,11 +534,13 @@ def build_parser():
     s_exc = sub.add_parser('exclude', help='Remove path from sync allowlist')
     s_exc.add_argument('paths', nargs='+', help='Path(s) to exclude')
 
-    # audit / remember
+    # audit / remember / memory
     s_aud = sub.add_parser('audit', help='Show last N memory commits')
     s_aud.add_argument('count', nargs='?', type=int, default=20, help='Commit count')
     s_rem = sub.add_parser('remember', help='Quick-capture fact to current month inbox')
     s_rem.add_argument('text', nargs='+', help='Fact text')
+    s_mem = sub.add_parser('memory', help='Inspect shared memory index, projects, and metrics')
+    s_mem.add_argument('action', nargs='?', choices=['status', 'list'], default='status')
 
     # connect / disconnect / harnesses
     s_con = sub.add_parser('connect', help='Connect an agent harness to engram')
@@ -536,6 +595,7 @@ def main(argv=None):
         'exclude': cmd_exclude,
         'audit': cmd_audit,
         'remember': cmd_remember,
+        'memory': cmd_memory,
         'connect': cmd_connect,
         'disconnect': cmd_disconnect,
         'harnesses': cmd_harnesses,

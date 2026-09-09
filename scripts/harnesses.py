@@ -72,22 +72,32 @@ def load_harnesses_spec():
         return json.load(f)
 
 
+def strip_json_comments(text):
+    """Strip single-line (//) and multi-line (/* */) comments from JSON string."""
+    text = re.sub(r'//.*$', '', text, flags=re.MULTILINE)
+    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+    return text
+
+
 def find_binary(names):
     """Check if any binary name exists on PATH or standard install locations."""
+    exts = ['', '.exe', '.cmd', '.bat', '.ps1'] if os.name == 'nt' else ['']
     for name in names:
-        found = shutil.which(name)
-        if found:
-            return found
-        # Common Windows user-local paths
-        candidates = [
-            HOME / '.local' / 'bin' / name,
-            HOME / 'AppData' / 'Local' / 'agy' / 'bin' / name,
-            HOME / 'AppData' / 'Roaming' / 'npm' / name,
-            HOME / 'AppData' / 'Local' / 'Programs' / name,
-        ]
-        for c in candidates:
-            if c.exists():
-                return str(c)
+        for ext in exts:
+            check_name = name + ext if not name.endswith(ext) else name
+            found = shutil.which(check_name)
+            if found:
+                return found
+            # Common Windows user-local paths
+            candidates = [
+                HOME / '.local' / 'bin' / check_name,
+                HOME / 'AppData' / 'Local' / 'agy' / 'bin' / check_name,
+                HOME / 'AppData' / 'Roaming' / 'npm' / check_name,
+                HOME / 'AppData' / 'Local' / 'Programs' / check_name,
+            ]
+            for c in candidates:
+                if c.exists():
+                    return str(c)
     return None
 
 
@@ -279,9 +289,12 @@ class HarnessManager:
         for name, src_dir in available.items():
             target = dest_dir / name
             if not dry_run:
-                if target.is_symlink() or (os.name == 'nt' and target.is_dir() and getattr(target, 'is_junction', lambda: False)()):
-                    target.unlink()
-                if target.exists():
+                if os.path.islink(str(target)) or target.is_symlink():
+                    try:
+                        target.unlink()
+                    except OSError:
+                        os.rmdir(str(target))
+                elif target.exists():
                     shutil.rmtree(target)
                 shutil.copytree(src_dir, target, ignore=shutil.ignore_patterns(*skip_names))
             count += 1
@@ -306,6 +319,11 @@ class HarnessManager:
                 if 'url' in entry:
                     entry['serverUrl'] = entry.pop('url')
                 entry.pop('type', None)
+            elif fmt == 'opencode':
+                if 'serverUrl' in entry:
+                    entry['url'] = entry.pop('serverUrl')
+                if entry.get('type') in ('http', 'sse') or ('url' in entry and 'command' not in entry):
+                    entry['type'] = 'remote'
             elif fmt == 'claude':
                 if 'serverUrl' in entry:
                     entry['url'] = entry.pop('serverUrl')
@@ -320,10 +338,15 @@ class HarnessManager:
         dest_file.parent.mkdir(parents=True, exist_ok=True)
         existing = {}
         if dest_file.exists():
+            content = dest_file.read_text(encoding='utf-8', errors='replace')
             try:
-                existing = json.loads(dest_file.read_text(encoding='utf-8'))
+                existing = json.loads(content)
             except Exception:
-                existing = {}
+                try:
+                    cleaned = strip_json_comments(content)
+                    existing = json.loads(cleaned)
+                except Exception as e:
+                    return [f'Warning: could not parse existing JSON/JSONC in {dest_file} ({e}); skipped injection to prevent overwriting user configuration']
 
         if key_name not in existing or not isinstance(existing[key_name], dict):
             existing[key_name] = {}

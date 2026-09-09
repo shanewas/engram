@@ -184,6 +184,51 @@ class TestEngramCli(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertNotIn('custom_folder', self.cli.get_allowlist())
 
+    def test_cli_memory(self):
+        # Scaffold index.md and a mock project
+        (self.repo / 'index.md').write_text('# Master Index\n- Line 2\n', encoding='utf-8')
+        (self.repo / 'projects').mkdir(exist_ok=True)
+        (self.repo / 'projects' / 'test-proj.md').write_text('# test-proj\nUpdated: 2026-09-09\nSome notes\n', encoding='utf-8')
+
+        # Test status
+        status_args = self.cli.build_parser().parse_args(['memory', 'status'])
+        self.assertEqual(self.cli.cmd_memory(status_args), 0)
+
+        # Test list
+        list_args = self.cli.build_parser().parse_args(['memory', 'list'])
+        self.assertEqual(self.cli.cmd_memory(list_args), 0)
+
+    def test_jsonc_comments_and_safe_mcp_injection(self):
+        dest = self.home / 'test_config.jsonc'
+        # Write JSONC with comments
+        dest.write_text("""{
+            // This is a comment
+            "existingKey": "existingValue", /* inline comment */
+            "mcpServers": {}
+        }""", encoding='utf-8')
+
+        hm = self.harnesses.HarnessManager(self.repo)
+        notes = hm._inject_mcp(dest, 'mcpServers', 'claude')
+        self.assertTrue(any('Injected' in n for n in notes))
+
+        # Ensure valid JSON output and preserved existingKey
+        data = json.loads(dest.read_text(encoding='utf-8'))
+        self.assertEqual(data.get('existingKey'), 'existingValue')
+        self.assertIn('test-server', data.get('mcpServers', {}))
+
+    def test_opencode_mcp_format(self):
+        dest = self.home / 'opencode.json'
+        dest.write_text('{"mcp": {}}', encoding='utf-8')
+
+        hm = self.harnesses.HarnessManager(self.repo)
+        notes = hm._inject_mcp(dest, 'mcp', 'opencode')
+        self.assertTrue(any('Injected' in n for n in notes))
+
+        data = json.loads(dest.read_text(encoding='utf-8'))
+        server = data['mcp']['test-server']
+        self.assertEqual(server.get('type'), 'remote')
+        self.assertEqual(server.get('url'), 'https://mcp.test.internal/v1')
+
 
 if __name__ == '__main__':
     unittest.main()

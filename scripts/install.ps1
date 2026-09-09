@@ -5,7 +5,7 @@ Usage:
   irm https://raw.githubusercontent.com/<you>/engram-memory/main/scripts/install.ps1 | iex
 #>
 param(
-    [string]$Remote = "https://github.com/shanewas/engram-memory.git",
+    [string]$Remote = "",
     [switch]$ReadOnly,
     [switch]$NoTask
 )
@@ -35,6 +35,17 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
 
 # 4. Clone or update repository
 if (-not (Test-Path (Join-Path $engramDir '.git'))) {
+    if (-not $Remote) {
+        if ($env:ENGRAM_REMOTE) {
+            $Remote = $env:ENGRAM_REMOTE
+        } else {
+            $Remote = Read-Host "[engram] Enter your private memory git repository URL"
+        }
+        if (-not $Remote) {
+            Write-Host "[engram] Error: No repository URL provided." -ForegroundColor Red
+            exit 1
+        }
+    }
     Write-Host "[engram] Cloning repository from $Remote..."
     $env:GIT_TERMINAL_PROMPT = '1'
     git clone $Remote $engramDir
