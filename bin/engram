@@ -15,8 +15,15 @@ _resolve_root() {
 }
 ROOT="$(_resolve_root)" || { echo "engram: no repo found (set ENGRAM_HOME or clone to ~/engram)"; exit 1; }
 cd "$ROOT" || exit 1
+
+# Prefer Python unified CLI engine if available
+if command -v python3 >/dev/null 2>&1 && [ -f "$ROOT/scripts/engram_cli.py" ]; then
+  exec python3 "$ROOT/scripts/engram_cli.py" "$@"
+elif command -v python >/dev/null 2>&1 && [ -f "$ROOT/scripts/engram_cli.py" ]; then
+  exec python "$ROOT/scripts/engram_cli.py" "$@"
+fi
 CONF="scripts/sync-paths.conf"
-SYNCED="index.md projects global inbox archive"   # fallback if conf unreadable
+SYNCED="index.md projects global inbox archive vault"   # fallback if conf unreadable
 
 _allowlist() {
   if [ -f "$CONF" ]; then sed 's/#.*//' "$CONF" | tr -s ' \t\n' ' ' | sed 's/^ //;s/ $//'; else echo "$SYNCED"; fi
@@ -82,7 +89,7 @@ cmd_audit() {
     | sed 's/^/  /'
   echo
   echo "Full diff of any change:  git -C $ROOT show <hash>"
-  echo "Blame a fact:             git -C $ROOT log -p -S '<text>' -- projects global"
+  echo "Blame a fact:             git -C $ROOT log -p -S '<text>' -- vault projects"
 }
 
 cmd_remember() {
@@ -103,8 +110,7 @@ cmd_pull()   { bash scripts/sync.sh pull "$@"; }
 cmd_push()   { bash scripts/sync.sh push "$@"; }
 cmd_doctor() { bash scripts/doctor.sh "$@"; }
 cmd_setup()  { bash scripts/setup.sh "$@"; }
-cmd_dotfiles(){ local py; py="$(command -v python3 || command -v python)"; [ -n "$py" ] || { echo "engram: python not found"; return 1; }; "$py" scripts/dotfiles.py "$@"; }
-cmd_restore(){ echo "Disaster recovery: $ROOT/restore/README.md"; [ -f restore/README.md ] && sed -n '1,24p' restore/README.md; }
+cmd_restore(){ echo "Restore runbook: $ROOT/restore/RESTORE-memory.md"; [ -f restore/RESTORE-memory.md ] && sed -n '1,20p' restore/RESTORE-memory.md; }
 
 cmd_help() {
   cat <<EOF
@@ -121,7 +127,6 @@ engram — control your shared memory (repo: $ROOT)
   engram doctor [--status] health check (--status = plain-language)
   engram setup             wire this machine (interactive)
   engram restore           show the disaster-recovery runbook
-  engram dotfiles <cmd>    harness config sync: apply | save | doctor (docs/dotfiles.md)
   engram help
 
 Everything is git underneath: every change is a commit — attributed, diffable,
@@ -144,7 +149,6 @@ main() {
     doctor)   cmd_doctor "$@";;
     setup)    cmd_setup "$@";;
     restore)  cmd_restore "$@";;
-    dotfiles) cmd_dotfiles "$@";;
     help|-h|--help) cmd_help;;
     *) echo "engram: unknown command '$c'"; echo; cmd_help; exit 1;;
   esac
