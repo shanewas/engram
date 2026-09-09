@@ -6,6 +6,7 @@ description: Save a durable fact to the engram shared memory repo. Use when the 
 # Remember
 
 Persist a fact into the engram memory repo. Canonical location: `~/engram` (Windows: `%USERPROFILE%\engram`). If not there, check the path given in the engram index already in your context.
+Quick capture via CLI: `engram remember "<dated fact>"` appends directly to the inbox.
 
 1. Identify the fact. Compress to atomic, dated bullets: `- YYYY-MM-DD — fact`. Facts, not narrative.
 2. Route it — only these paths sync, nothing else, so the fact must land in one of them:

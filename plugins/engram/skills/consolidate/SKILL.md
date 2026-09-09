@@ -9,7 +9,7 @@ Goal: total always-loaded context stays small; every fact stays findable; the no
 
 Unlike `remember`, this skill **does** run git directly — sync hooks only ever touch the commit allowlist (`scripts/sync-paths.conf`; default `index.md projects/ global/ inbox/ archive/`), so resolving alerts, conflict branches, and stray files needs a human-equivalent hand on the repo.
 
-1. Sync first: run `scripts/sync.sh pull` (Linux) or `scripts\sync.ps1 pull` (Windows).
+1. Sync first: run `engram sync pull` (or `scripts/sync.sh pull` / `scripts\sync.ps1 pull`).
 2. `ALERT.md` present at repo root? Read it — it names what failed and which `conflict/<host>` branch holds the commits. Resolve via step 3, then delete `ALERT.md`.
 3. Conflict branches: `git fetch origin`. For each `origin/conflict/<host>` found (`git branch -r | grep conflict/`): merge its facts into the corresponding local files (newest dated fact wins — verify against actual code if the repo is reachable on this machine), commit on `main`, `git push`, then `git push origin --delete conflict/<host>`.
 4. `git status --porcelain`: anything outside the allowlist that's untracked or modified never syncs automatically. Surface it in the report; if it's memory content, move it into `index.md`/`projects/`/`global/`/`inbox/`/`archive/` — until then it only exists on this machine.
@@ -19,4 +19,4 @@ Unlike `remember`, this skill **does** run git directly — sync hooks only ever
 8. Rebuild the Projects table in `index.md`; enforce < 100 lines total.
 9. Log the run: append `- YYYY-MM-DD <host>` to `archive/consolidate-log.md` (create if missing). Sync's pull-time "consolidate memory" nudge reads the last date in this file — skipping this step breaks the reminder for every machine.
 10. Report in a few lines: alerts/conflict branches resolved, strays found, moved, merged, archived, contradictions found.
-11. Push: `scripts/sync.sh push` or `scripts\sync.ps1 push`.
+11. Push: `engram sync push` (or `scripts/sync.sh push` / `scripts\sync.ps1 push`). Run `engram doctor` to verify health.

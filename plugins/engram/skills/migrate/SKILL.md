@@ -35,6 +35,7 @@ Convert to atomic, dated bullets (`- YYYY-MM-DD — fact`). Compress prose; drop
 ## Finish
 
 1. Refresh affected one-liners in `index.md`.
-2. Do NOT run git — sync hooks handle commit/push.
+2. Do NOT run manual git — sync hooks handle commit/push (or run `engram sync push`).
 3. Report in a few lines: sources swept, facts moved (per destination), skipped items and why.
-4. Suggest running `consolidate` after every machine has migrated, to dedupe across them.
+4. Wire harnesses if not already connected: `engram connect --all`.
+5. Suggest running `consolidate` after every machine has migrated, to dedupe across them.
