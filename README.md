@@ -1,91 +1,118 @@
 # Engram
 
-Cross-machine memory for Claude Code, Antigravity (agy), OpenCode, Muse, and other coding agents. Facts live as plain markdown in a private git repo you own; sync scripts move them between your machines automatically.
+Shared memory, skills, and tools for AI coding agents across all your computers.
 
-## How it works
+You switch laptops, open Claude Code or Antigravity, and your agent forgets who you are, how your codebase is architected, and what skills you already built. Engram fixes that. Your agents share a single brain stored as plain markdown files in a private git repo you own.
 
-- **The git repo is the store and the audit log.** Every fact is a commit: attributed, timestamped, revertible with `git revert`. There is no database and no service; if you stop using Engram, you keep readable markdown files.
-- **`index.md` is loaded into your agent sessions** (via `@import` in `~/.claude/CLAUDE.md`, rules in `~/.gemini/rules/engram.md`, or agent instructions). It is a routing table, kept under 100 lines: it tells the agent what memory exists and where. Detail files (`projects/<name>.md`, `global/*.md`) are read lazily during the session.
-- **Sync is automatic.** A SessionStart hook pulls, a SessionEnd hook pushes, and a 30-minute cron/scheduled task pushes as the durability backstop. Sync never blocks a session and never prompts for credentials (see [`docs/sync-contract.md`](docs/sync-contract.md)).
-- **An allowlist bounds what syncs.** Only paths listed in `scripts/sync-paths.conf` (default: `index.md`, `projects/`, `global/`, `inbox/`, `archive/`) are ever auto-committed. Scripts, docs, and config require a deliberate manual commit.
-- **Skills do the writing.** `remember` routes a fact to the right file, `consolidate` does weekly maintenance, `migrate` imports pre-existing CLAUDE.md memory. They live in [`plugins/engram/skills/`](plugins/engram/skills/) and are copied to `~/.claude/skills` and `~/.gemini/config/skills` on setup and on every pull.
+---
 
-## Requirements
+## Supported Agents
 
-- git on every machine
-- Python 3.8+ (for cross-platform CLI and dotfiles engine)
-- `jq` on Linux (`sudo apt install -y jq`)
-- A private GitHub repo (or any git remote) as the hub
-- Non-interactive `git push` (SSH key or cached token). Engram never opens a login prompt; if auth fails it records the error and retries later.
+Engram connects directly to:
 
-## Install
+- **Claude Code**: Wires `@<engram>/index.md` into `~/.claude/CLAUDE.md`, copies skills to `~/.claude/skills`, injects MCP servers into `~/.claude.json`.
+- **Antigravity (agy)**: Wires memory rules into `~/.gemini/rules/engram.md`, copies skills to `~/.gemini/config/skills`, injects MCP servers into `~/.gemini/config/mcp_config.json`.
+- **OpenCode**: Wires instructions into `~/.config/opencode/instructions.md`, copies skills to `~/.config/opencode/skills`, injects MCP servers into `~/.config/opencode/opencode.jsonc`.
+- **Muse**: Wires memory into `~/.muse/instructions.md`, copies skills to `~/.muse/skills`.
+- **Hermes**: Distills remote agent session logs into readable local digest notes.
 
-Your memories live in a private repo, not in this one. First machine: clone this template, push it to your private hub. Every other machine: clone the private hub.
+---
 
-**One line on Windows (PowerShell):**
+## Quick Start (3 Steps)
 
+### Step 1: Create your private memory repo
+Click **Use this template** (or fork) on GitHub and name it `engram-memory`. Make sure it is **Private**.
+
+### Step 2: Install on your first computer
+
+**Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/<you>/my-engram/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/<your-username>/engram-memory/main/scripts/install.ps1 | iex
 ```
 
-**One line on Linux/macOS/WSL (Bash):**
-
+**Linux / macOS / WSL (Bash):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<you>/my-engram/main/scripts/install.sh | bash -s -- git@github.com:<you>/my-engram.git
+curl -fsSL https://raw.githubusercontent.com/<your-username>/engram-memory/main/scripts/install.sh | bash
 ```
 
-The installer clones the repository, adds `bin/` to your PATH, scaffolds `~/.config/dotfiles/secrets.env`, auto-detects installed coding agents, connects them, and runs `engram doctor`.
+The installer:
+1. Clones your private memory repo to `~/engram` (or `%USERPROFILE%\engram`).
+2. Adds the `engram` command to your PATH.
+3. Finds your installed coding agents and connects them automatically.
+4. Deploys your central skills and MCP servers.
+5. Runs a diagnostic health check (`engram doctor`).
 
-**Manual / from an existing clone:**
+### Step 3: Install on your other computers
+Run the same one-liner on your work laptop, home PC, or VPS. Everything you taught your agents on machine A is immediately available on machine B.
 
-```bash
-bash scripts/setup.sh                                              # Linux
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup.ps1       # Windows
-```
+---
 
-**Headless (servers, CI):**
+## How It Works
 
-```bash
-bash scripts/setup-vps.sh --remote git@github.com:<you>/my-engram.git [--read-only] [--no-cron]
-```
+1. **Your git repo is the database.** Every note and learned fact is a git commit with a timestamp and author. You can view changes with `git log` and undo mistakes with `git revert`. No external databases, no cloud subscriptions, no lock-in.
+2. **Context stays fast and cheap.** Only `index.md` is loaded at session start. It is a routing table under 100 lines. Project notes (`projects/<slug>.md`) are read by the agent on demand only when you work on that specific project.
+3. **Sync runs in the background.** Sessions pull when starting and push when finishing. A 30-minute background task provides a safety net so unsaved edits still sync if an agent crashes.
+4. **Skills are real folders, not symlinks.** Windows tools like Claude Code silently ignore directory symlinks. Engram copies skills as real folders into each agent's skill directory so they always work.
 
-## The `engram` CLI
+---
 
-The `engram` CLI runs natively on Windows (`bin\engram.cmd`, `bin\engram.ps1`), Linux, and macOS (`bin/engram`):
+## Daily Commands
 
-| Command | Description |
+You rarely need to run commands manually, but the `engram` CLI gives you full control whenever you want it:
+
+| Command | What it does |
 |---|---|
-| `engram status` | Branch, unpushed/behind counts, uncommitted files, alerts, and connected harnesses |
-| `engram sync` / `pull` / `push` | Sync memory now (never blocks; conflicts park on a branch) |
-| `engram connect <name\|--all>` | Wire memory, skills, and MCP to an agent (`claude`, `antigravity`, `opencode`, `muse`, `hermes`) |
-| `engram disconnect <name>` | Unwire memory from an agent harness |
-| `engram harnesses` | List supported and detected agent harnesses on this machine |
-| `engram skills list` / `sync` | List available skills or deploy them to all connected harnesses |
-| `engram mcp list` / `sync` | List central MCP servers or compile configs for each harness |
-| `engram paths` | What syncs, and what is tracked but deliberately not auto-synced |
-| `engram include <path>` / `exclude <path>` | Edit the allowlist (then commit `sync-paths.conf`) |
-| `engram audit [N]` | Last N memory changes (hash, timestamp, message), each diffable via `git show` |
-| `engram remember <text>` | Quick-capture a dated bullet into `inbox/YYYY-MM.md` |
-| `engram hermes [digest]` | Digest VPS Hermes session logs into local Obsidian inbox |
-| `engram dotfiles apply` / `save` | Sync harness config (settings, hooks, rules, plugin lists) next to memory |
-| `engram doctor [--status]` | Complete system health check |
-| `engram restore` | Show the disaster-recovery runbook (`restore/RESTORE-memory.md`) |
+| `engram status` | Shows branch, unpushed commits, uncommitted notes, and connected agents |
+| `engram memory` | Checks line counts against budgets (`index.md` < 100 lines, projects < 300 lines) |
+| `engram memory list` | Lists all active project files with line counts and last-updated dates |
+| `engram remember "fact"` | Quick-captures a dated note into this month's inbox |
+| `engram sync` | Pulls remote changes then pushes local edits |
+| `engram connect --all` | Re-scans your computer and wires all detected agent harnesses |
+| `engram skills sync` | Fans out central skills to all connected agents |
+| `engram mcp sync` | Compiles and injects central MCP servers into agent configurations |
+| `engram doctor` | Runs a complete health check on git remotes, configs, and agents |
 
-## Agent Harnesses
+---
 
-Engram can connect to multiple coding agents on the same computer:
+## Memory Layout
 
-1. **Claude Code**: Wires `@<engram>/index.md` into `~/.claude/CLAUDE.md`, copies skills to `~/.claude/skills`, injects MCP servers into `~/.claude.json`.
-2. **Antigravity (agy)**: Wires memory rules into `~/.gemini/rules/engram.md`, copies skills to `~/.gemini/config/skills`, injects MCP servers into `~/.gemini/config/mcp_config.json`.
-3. **OpenCode**: Wires instructions into `~/.config/opencode/instructions.md`, copies skills to `~/.config/opencode/skills`, configures `opencode.jsonc`.
-4. **Muse**: Wires memory into `~/.muse/instructions.md`, copies skills to `~/.muse/skills`.
-5. **Hermes Bridge**: Links VPS memory sessions from `vault/<bank>/sessions/` into local Obsidian digests.
+```text
+engram/
+├── index.md            # Master routing table (loaded into every session, <100 lines)
+├── projects/           # One file per project (lazy-loaded on demand, <300 lines)
+│   ├── _template.md    # Template for new projects
+│   └── my-app.md       # Architecture decisions, tech stack, gotchas
+├── global/             # Cross-project preferences, coding conventions, machine facts
+│   ├── preferences.md  # How you like to work
+│   └── machines.md     # Node-specific paths and quirks
+├── inbox/              # Append-only quick captures (merged during weekly cleanup)
+│   └── 2026-09.md
+├── archive/            # Retired projects and compressed historical notes
+├── dotfiles/           # Declarative harness adapters and MCP registry templates
+└── scripts/            # CLI engine, sync scripts, installers, and test suites
+```
 
-Run `engram connect --all` to automatically configure every detected agent on a new machine.
+---
 
-## Data safety and failure modes
+## Built-in Skills
 
-- **Secret scan before every push.** Staged additions are scanned for AWS/GitHub/Slack/OpenAI/Anthropic/Google key patterns, private keys, JWTs, and generic `password=`/`token=` shapes. A hit unstages everything, writes `ALERT.md`, and refuses to commit. False positives are bypassed only by marking the exact line with `engram:not-a-secret` (patterns and rules in [`docs/sync-contract.md`](docs/sync-contract.md) §7).
-- **Conflicts never lose data.** If a rebase conflicts or a push is rejected, the node force-pushes its commits to a per-host `conflict/<host>` branch on the hub, writes a local `ALERT.md`, and the next session surfaces it. "consolidate memory" merges the branch and deletes it.
-- **History is git.** Recover any old version with `git log -- projects/x.md` then `git checkout <sha> -- projects/x.md`. Losing a machine loses at most one sync interval (~30 min) of unpushed writes; see [`restore/README.md`](restore/README.md).
-- **Sync never blocks or prompts.** Every remote operation runs with terminal prompts and credential dialogs disabled and a low-speed timeout; sync scripts always exit 0.
+Engram ships with skills that teach your agents how to manage memory:
+
+- `/remember`: Captures a durable fact and files it into the right project file or inbox.
+- `/consolidate`: Weekly cleanup skill. Merges inbox captures into project files, compresses old entries, archives dead projects, and trims `index.md`.
+- `/migrate`: Sweeps existing pre-engram notes or `CLAUDE.md` files from a new computer into your shared memory.
+- `/engram`: Controls and inspects the Engram CLI directly from inside any agent chat.
+
+---
+
+## Safety Guarantees
+
+- **Secret scanner before commit**: Engram scans staged diffs for private keys, API tokens, and passwords before every push. If a secret is detected, it unstages the files and alerts you. It will never push keys to GitHub.
+- **Sync never interrupts your work**: Automated hooks always exit with code 0. If GitHub is unreachable or credentials need updating, the script records the error and lets you continue coding uninterrupted.
+- **Merge conflicts never lose data**: If two computers edit memory at the same time and rebase conflicts, Engram force-pushes your local work to a separate `conflict/<machine>` branch and creates an `ALERT.md` note. Nothing is overwritten or deleted.
+
+---
+
+## License
+
+MIT
