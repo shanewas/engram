@@ -129,8 +129,10 @@ else
 fi
 
 # 4. skills are real dirs (not symlinks), each with SKILL.md --------------------
-if [ -d "$DIR/plugins/engram/skills" ]; then
-  for d in "$DIR/plugins/engram/skills"/*/; do
+SKILLS_SRC="$DIR/.claude/skills"
+[ -d "$SKILLS_SRC" ] || SKILLS_SRC="$DIR/plugins/engram/skills"
+if [ -d "$SKILLS_SRC" ]; then
+  for d in "$SKILLS_SRC"/*/; do
     [ -d "$d" ] || continue
     name="$(basename "$d")"
     target="${HOME:-}/.claude/skills/$name"
@@ -143,7 +145,7 @@ if [ -d "$DIR/plugins/engram/skills" ]; then
     fi
   done
 else
-  warn "no plugins/engram/skills directory in repo — nothing to check"
+  warn "no skills directory in repo (.claude/skills or plugins/engram/skills) — nothing to check"
 fi
 
 # 5. cron ------------------------------------------------------------------------
@@ -207,10 +209,6 @@ if [ -f "$DIR/index.md" ]; then
     pass "index.md is $lines lines (<= 100)"
   fi
 fi
-
-echo "--- dotfiles ---"
-PY="$(command -v python3 || command -v python || true)"
-if [ -n "$PY" ]; then "$PY" "$(dirname "$0")/dotfiles.py" doctor || FAILURES=$((FAILURES+1)); else echo "SKIP python not found"; fi
 
 echo
 if [ "$FAILURES" -gt 0 ]; then

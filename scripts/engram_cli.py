@@ -16,7 +16,6 @@ Supported subcommands:
   engram exclude <path>         Remove path from sync allowlist
   engram audit [N]              Show last N memory commits
   engram remember <text>        Quick-capture atomic fact to current month's inbox
-  engram hermes [digest]        Digest VPS Hermes memory sessions into local inbox
   engram doctor [--status]      Complete system health check
   engram restore                Show disaster recovery runbook
 
@@ -305,7 +304,7 @@ def cmd_connect(args):
         targets = [hid for hid, s in statuses.items() if s['detected']]
         if not targets:
             print('No known agent harnesses detected on this machine.')
-            print('Supported harnesses: claude, antigravity, opencode, muse, hermes')
+            print('Supported harnesses: claude, antigravity, opencode, muse')
             return 0
     elif args.name:
         targets = [args.name.lower()]
@@ -361,7 +360,7 @@ def cmd_skills(args):
     if action == 'sync':
         hm = HarnessManager(REPO_ROOT)
         statuses = hm.status()
-        connected = [hid for hid, s in statuses.items() if s['detected'] and hid != 'hermes']
+        connected = [hid for hid, s in statuses.items() if s['detected']]
         if not connected:
             print('No detected agent harnesses to sync skills to.')
             return 0
@@ -402,7 +401,7 @@ def cmd_mcp(args):
     if action == 'sync':
         hm = HarnessManager(REPO_ROOT)
         statuses = hm.status()
-        connected = [hid for hid, s in statuses.items() if s['detected'] and hid != 'hermes']
+        connected = [hid for hid, s in statuses.items() if s['detected']]
         print(f'Syncing central MCPs to {len(connected)} harness(es)...')
         for hid in connected:
             conf = hm.spec.get(hid, {})
@@ -432,18 +431,6 @@ def cmd_dotfiles(args):
     return subprocess.run(cmd).returncode
 
 
-def cmd_hermes(args):
-    """Execute Hermes activity digest into local vault inbox."""
-    digest_script = REPO_ROOT / 'scripts' / 'digest-hermes.ps1'
-    if not digest_script.exists():
-        print(f'scripts/digest-hermes.ps1 not found.')
-        return 1
-    if os.name == 'nt':
-        cmd = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(digest_script)]
-    else:
-        print('Hermes PowerShell digest is configured for Windows hosts.')
-        return 0
-    return subprocess.run(cmd, cwd=str(REPO_ROOT)).returncode
 
 
 def cmd_doctor(args):
@@ -544,7 +531,7 @@ def build_parser():
 
     # connect / disconnect / harnesses
     s_con = sub.add_parser('connect', help='Connect an agent harness to engram')
-    s_con.add_argument('name', nargs='?', help='Harness name (claude, antigravity, opencode, muse, hermes)')
+    s_con.add_argument('name', nargs='?', help='Harness name (claude, antigravity, opencode, muse)')
     s_con.add_argument('--all', action='store_true', help='Connect all detected harnesses')
     s_con.add_argument('--dry-run', action='store_true', help='Preview changes without writing')
 
@@ -566,9 +553,7 @@ def build_parser():
     s_dot = sub.add_parser('dotfiles', help='Delegate to dotfiles.py for config templates')
     s_dot.add_argument('dotfiles_args', nargs=argparse.REMAINDER, help='apply | save | doctor')
 
-    # hermes / doctor / restore
-    s_her = sub.add_parser('hermes', help='Hermes bridge actions')
-    s_her.add_argument('action', nargs='?', choices=['digest'], default='digest')
+    # doctor / restore
 
     s_doc = sub.add_parser('doctor', help='Complete system health check')
     s_doc.add_argument('--status', action='store_true', help='Plain-language summary')
@@ -602,7 +587,6 @@ def main(argv=None):
         'skills': cmd_skills,
         'mcp': cmd_mcp,
         'dotfiles': cmd_dotfiles,
-        'hermes': cmd_hermes,
         'doctor': cmd_doctor,
         'restore': cmd_restore,
     }

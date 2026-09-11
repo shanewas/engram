@@ -166,7 +166,8 @@ if ($settingsValid) {
 }
 
 # 5. skills are real dirs (not symlinks/junctions), each with SKILL.md -------------
-$skillsSrc = Join-Path $repo 'plugins\engram\skills'
+$skillsSrc = Join-Path $repo '.claude\skills'
+if (-not (Test-Path $skillsSrc)) { $skillsSrc = Join-Path $repo 'plugins\engram\skills' }
 if (Test-Path $skillsSrc) {
     Get-ChildItem -Path $skillsSrc -Directory | ForEach-Object {
         $name   = $_.Name
@@ -185,15 +186,29 @@ if (Test-Path $skillsSrc) {
         }
     }
 } else {
-    Test-Warn "no plugins/engram/skills directory in repo - nothing to check"
+    Test-Warn "no skills directory in repo (.claude/skills or plugins/engram/skills) - nothing to check"
 }
 
 # 6. scheduled task -----------------------------------------------------------------
+# Get-ScheduledTask reads through the Task Scheduler CIM provider, which throws
+# 0x80041318 for the ENTIRE store if any single task on the machine has malformed XML.
+# schtasks.exe reads tasks individually, so fall back to it — one unrelated corrupt
+# task must not mask a healthy EngramSync.
 try {
     $task = Get-ScheduledTask -TaskName 'EngramSync' -ErrorAction Stop
     Test-Pass "scheduled task: EngramSync exists (state: $($task.State))"
 } catch {
-    Test-Fail "scheduled task: EngramSync does NOT exist"
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $out = & schtasks.exe /query /tn 'EngramSync' /fo LIST 2>$null
+    $ErrorActionPreference = $prevEap
+    if ($LASTEXITCODE -eq 0 -and $out) {
+        $statusLine = $out | Select-String -Pattern '^\s*Status:\s*(.+?)\s*$' | Select-Object -First 1
+        $state = if ($statusLine) { $statusLine.Matches[0].Groups[1].Value } else { 'unknown' }
+        Test-Pass "scheduled task: EngramSync exists (state: $state; via schtasks - CIM store unreadable)"
+    } else {
+        Test-Fail "scheduled task: EngramSync does NOT exist"
+    }
 }
 
 # 7. ALERT.md -------------------------------------------------------------------------

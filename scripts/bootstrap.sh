@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # engram bootstrap (Linux/macOS) — one command to wire a brand-new machine.
 #
-#   curl -fsSL https://raw.githubusercontent.com/<you>/my-engram/main/scripts/bootstrap.sh | bash -s -- <repo-ssh-url>
-# (the raw-curl form needs a PUBLIC hub repo; if your hub is private, clone it
-#  first and run the form below.)
+#   curl -fsSL https://raw.githubusercontent.com/<you>/engram-memory/main/scripts/bootstrap.sh | bash -s -- <repo-ssh-url>
 # or, from an existing clone:
 #   bash scripts/bootstrap.sh
 #

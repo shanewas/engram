@@ -13,7 +13,7 @@ class Base(unittest.TestCase):
         (self.repo / 'dotfiles' / 'hosts').mkdir(parents=True)
         (self.repo / 'dotfiles' / 'claude').mkdir()
         (self.repo / 'dotfiles' / 'claude' / 'hooks').mkdir()
-        (self.repo / 'plugins' / 'engram' / 'skills').mkdir(parents=True)
+        (self.repo / '.claude' / 'skills').mkdir(parents=True)
         self.home.mkdir()
         self.cfg.mkdir()
         os.environ['DOTFILES_REPO'] = str(self.repo)

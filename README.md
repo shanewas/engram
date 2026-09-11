@@ -13,8 +13,7 @@ Engram connects directly to:
 - **Claude Code**: Wires `@<engram>/index.md` into `~/.claude/CLAUDE.md`, copies skills to `~/.claude/skills`, injects MCP servers into `~/.claude.json`.
 - **Antigravity (agy)**: Wires memory rules into `~/.gemini/rules/engram.md`, copies skills to `~/.gemini/config/skills`, injects MCP servers into `~/.gemini/config/mcp_config.json`.
 - **OpenCode**: Wires instructions into `~/.config/opencode/instructions.md`, copies skills to `~/.config/opencode/skills`, injects MCP servers into `~/.config/opencode/opencode.jsonc`.
-- **Muse**: Wires memory into `~/.muse/instructions.md`, copies skills to `~/.muse/skills`.
-- **Hermes**: Distills remote agent session logs into readable local digest notes.
+- **Muse**: Shares `~/.claude/CLAUDE.md` for memory, copies skills to `~/.config/muse/skills`.
 
 ---
 
@@ -71,6 +70,21 @@ You rarely need to run commands manually, but the `engram` CLI gives you full co
 | `engram skills sync` | Fans out central skills to all connected agents |
 | `engram mcp sync` | Compiles and injects central MCP servers into agent configurations |
 | `engram doctor` | Runs a complete health check on git remotes, configs, and agents |
+| `engram audit [N]` | Shows the last N memory changes as attributed, diffable history |
+| `engram dotfiles apply` | Renders config templates (settings, rules, hooks) onto this machine |
+| `engram restore` | Prints the disaster-recovery runbook when something breaks badly |
+
+Tokens and passwords live in `~/.config/dotfiles/secrets.env` on each machine (created by setup, `0600`, never committed). Templates reference them as `{{SECRET:NAME}}`; `engram mcp sync` and `dotfiles apply` fill them in.
+
+---
+
+## Work Machines (Read-Only or Partial)
+
+On a computer that must never upload memory, answer "read-only" during setup. To skip bulky folders locally (they stay on the hub and other machines), list them when setup asks, or later:
+
+```bash
+git sparse-checkout set --no-cone '/*' '!vault'
+```
 
 ---
 
