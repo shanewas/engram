@@ -46,6 +46,18 @@ Run the same one-liner on your work laptop, home PC, or VPS. Everything you taug
 
 ---
 
+## What a New PC Gets
+
+After install + `connect`, each machine has the same setup:
+
+- **Memory**: every note and learned fact from all machines, loaded via `index.md` at session start. Nothing to import.
+- **Skills**: the full central skill set (remember, consolidate, migrate, plus your own) copied as real folders into each agent's skills dir.
+- **Config**: MCP servers injected with tokens from that machine's `secrets.env`, plus shared settings, rules, and hooks after `dotfiles apply`.
+
+By hand on the new PC: install git + your agents, run the one-liner, fill in `secrets.env`, run `mcp sync` → `connect --all` → `doctor`, restart the agents. About 10 minutes.
+
+---
+
 ## How It Works
 
 1. **Your git repo is the database.** Every note and learned fact is a git commit with a timestamp and author. You can view changes with `git log` and undo mistakes with `git revert`. No external databases, no cloud subscriptions, no lock-in.
