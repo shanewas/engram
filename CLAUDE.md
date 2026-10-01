@@ -22,5 +22,5 @@ Cross-machine memory system for Claude Code. Markdown in git; a private git hub 
 - No secrets, credentials, or tokens — ever. No employer/client-confidential material without explicit approval.
 - Sync is automatic: SessionStart pulls, SessionEnd pushes, 30-min scheduled task/cron as safety net. Manual: `engram sync push` / `engram sync pull` (or `scripts/sync.ps1` / `scripts/sync.sh`).
 - Harness management: `engram connect <harness|--all>`, `engram skills sync`, `engram mcp sync`.
-- `inbox/**` uses git union merge (never conflicts). Other files merge normally; a conflicted rebase is auto-aborted by sync and surfaces at the next consolidate run.
+- All memory paths (`index.md`, `projects/`, `global/`, `inbox/`, `archive/`) use git union merge: same-line edits on two machines keep both lines, never conflict; consolidate dedupes. Only modify/delete and code changes can still conflict — that rebase is auto-aborted by sync and surfaces at the next consolidate run.
 - Normative sync behaviour: `docs/sync-contract.md` — the doc wins over the scripts on any disagreement. After touching either sync script, run `scripts/test-sync.sh` AND `SYNC_IMPL=ps1 scripts/test-sync.sh`; both must pass identically.

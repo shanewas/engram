@@ -198,6 +198,27 @@ function Invoke-PullRebase {
     return 2
 }
 
+# Drain (section 4 pull): a SessionEnd push that committed but died before reaching
+# the hub leaves commits only this node holds. The pull just rebased them onto
+# origin/main, so pushing is safe; costs nothing when there is nothing to push.
+function Invoke-Drain {
+    if (Test-Path $ReadOnlyMarker) { return }
+    $ahead = [string](& git rev-list --count '@{u}..HEAD' 2>$null | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or $ahead -notmatch '^\d+$' -or [int]$ahead -le 0) { return }
+    $out = (Invoke-GitRemote push 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        Invoke-Escalate ("pull: draining {0} unpushed commit(s) failed: {1}" -f $ahead, (Get-Snip $out))
+    }
+}
+
+# A transient failure is not escalated, but it is not silent either: one line on
+# stdout reaches the session context, so the model knows memory may be stale.
+function Write-Offline([string]$GitOutput) {
+    $first = @(($GitOutput -split "`r?`n") | Where-Object { $_ -and $_.Trim() })
+    $line = if ($first.Count -gt 0) { $first[0] } else { '' }
+    Write-Output ('[engram] memory did not sync (offline?): {0}' -f $line)
+}
+
 # --- section 7: secret scan - scans ADDED lines of the staged diff only ---
 function Get-SecretHits {
     $diff  = & git diff --cached -U0 --text 2>$null
@@ -311,11 +332,13 @@ from the repo root and re-run sync - or run scripts\setup.ps1 for a guided setup
             Update-Skills
             if (Test-Path $AlertFile) { Remove-Item $AlertFile -Force 2>$null }
             Set-StateOk
+            Invoke-Drain
             Show-ConsolidateNudge
         } elseif ($r -eq 1) {
             Invoke-Escalate 'pull: rebase onto origin/main conflicted'
         } else {
             Set-StateErr ("pull failed: {0}" -f (Get-Snip $script:PullOutput))
+            Write-Offline $script:PullOutput
         }
     } else {
         # push
@@ -353,6 +376,7 @@ from the repo root and re-run sync - or run scripts\setup.ps1 for a guided setup
                     Invoke-Escalate 'push: pre-push rebase onto origin/main conflicted'
                 } else {
                     Set-StateErr ("push: pre-push pull failed: {0}" -f (Get-Snip $script:PullOutput))
+                    Write-Offline $script:PullOutput
                 }
             }
         }

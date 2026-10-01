@@ -64,7 +64,7 @@ q() { "$@" >/dev/null 2>&1; }
 #   $base/origin.git   bare "hub"
 #   $base/nodeA         clone, with scripts/$SYNC_BASENAME + hostname shims (echo "nodeA")
 #   $base/nodeB         clone, with scripts/$SYNC_BASENAME + hostname shims (echo "nodeB")
-# Both clones get the real repo's .gitattributes (inbox/** merge=union) via the
+# Both clones get the real repo's .gitattributes (memory paths merge=union) via the
 # seed commit, exactly as production nodes would via git clone.
 # ---------------------------------------------------------------------------
 make_world() {
@@ -286,7 +286,55 @@ test_union_merge() {
 }
 
 # ===========================================================================
-# 6. conflict escalation
+# 5b. union merge on the other memory paths: same-line edits on both nodes
+#     keep both lines - no conflict branch, no ALERT, no blocked node
+# ===========================================================================
+test_union_merge_memory_paths() {
+  local base="$WORK/t5b" origin nodeA nodeB
+  make_world "$base"
+  origin="$base/origin.git"; nodeA="$base/nodeA"; nodeB="$base/nodeB"
+
+  echo "line one" > "$nodeA/projects/x.md"
+  q run_sync "$nodeA" push
+  q run_sync "$nodeB" pull
+
+  echo "edited by A" > "$nodeA/projects/x.md"
+  echo "edited by B" > "$nodeB/projects/x.md"
+  printf '# index\n\nrow from A\n' > "$nodeA/index.md"
+  printf '# index\n\nrow from B\n' > "$nodeB/index.md"
+
+  q run_sync "$nodeA" push
+  local rc
+  run_sync "$nodeB" push >/dev/null
+  rc=$?
+
+  local ok=1 detail="" proj idx
+  [ "$rc" -eq 0 ] || { ok=0; detail="$detail rc=$rc;"; }
+  proj="$(git -C "$origin" show main:projects/x.md 2>/dev/null)"
+  idx="$(git -C "$origin" show main:index.md 2>/dev/null)"
+  printf '%s' "$proj" | grep -q "edited by A" || { ok=0; detail="$detail projects: missing A's line;"; }
+  printf '%s' "$proj" | grep -q "edited by B" || { ok=0; detail="$detail projects: missing B's line;"; }
+  printf '%s' "$idx" | grep -q "row from A" || { ok=0; detail="$detail index: missing A's row;"; }
+  printf '%s' "$idx" | grep -q "row from B" || { ok=0; detail="$detail index: missing B's row;"; }
+  if git -C "$origin" branch --list 'conflict/*' 2>/dev/null | grep -q conflict; then
+    ok=0; detail="$detail unexpected conflict/* branch on origin;"
+  fi
+  [ -f "$nodeB/ALERT.md" ] && { ok=0; detail="$detail unexpected ALERT.md on nodeB;"; }
+  case "$(cat "$nodeB/.git/engram-state" 2>/dev/null)" in
+    ok\ *) : ;;
+    *) ok=0; detail="$detail engram-state not ok;" ;;
+  esac
+
+  if [ "$ok" = 1 ]; then
+    pass "5b union merge on projects/ + index.md (same-line edits keep both, no conflict, no alert)"
+  else
+    fail "5b union merge on projects/ + index.md" "$detail proj=[$proj] idx=[$idx]"
+  fi
+}
+
+# ===========================================================================
+# 6. conflict escalation - the one class union merge cannot absorb:
+#    nodeA deletes a file (archive-style) while nodeB edits it (modify/delete)
 # ===========================================================================
 test_conflict_escalation() {
   local base="$WORK/t6" origin nodeA nodeB
@@ -297,7 +345,7 @@ test_conflict_escalation() {
   q run_sync "$nodeA" push
   q run_sync "$nodeB" pull
 
-  echo "edited by A" > "$nodeA/projects/x.md"
+  rm -f "$nodeA/projects/x.md"
   echo "edited by B" > "$nodeB/projects/x.md"
 
   q run_sync "$nodeA" push
@@ -453,19 +501,73 @@ test_never_blocks() {
 
   local mode
   for mode in pull push; do
-    local start dur rc
+    local start dur rc out
     start=$(date +%s)
-    run_sync "$nodeA" "$mode" "$SYNC_BUDGET" >/dev/null 2>&1
+    out="$(run_sync "$nodeA" "$mode" "$SYNC_BUDGET" 2>/dev/null)"
     rc=$?
     dur=$(( $(date +%s) - start ))
     if [ "$rc" -eq 124 ]; then
       fail "10 never blocks ($mode)" "TIMED OUT (rc=124) after ${dur}s - sync hung"
     elif [ "$rc" -ne 0 ]; then
       fail "10 never blocks ($mode)" "unexpected exit code $rc after ${dur}s"
+    elif ! printf '%s' "$out" | grep -q '\[engram\] memory did not sync'; then
+      fail "10 never blocks ($mode)" "exit 0 but no offline one-liner on stdout: [$out]"
     else
-      pass "10 never blocks ($mode): exit 0 in ${dur}s against an unreachable remote"
+      pass "10 never blocks ($mode): exit 0 in ${dur}s against an unreachable remote, offline line printed"
     fi
   done
+}
+
+# ===========================================================================
+# 16. drain on pull: a commit a dead SessionEnd push left behind reaches the
+#     hub at the next pull; a read-only node never pushes
+# ===========================================================================
+test_drain_on_pull() {
+  local base="$WORK/t16" origin nodeA nodeB
+  make_world "$base"
+  origin="$base/origin.git"; nodeA="$base/nodeA"; nodeB="$base/nodeB"
+
+  # SessionEnd push committed, then died before the network push
+  echo "committed but never pushed" > "$nodeA/projects/d.md"
+  q git -C "$nodeA" add projects
+  q git -C "$nodeA" commit -q -m "sync(nodea): stranded"
+
+  local rc content ok=1 detail=""
+  run_sync "$nodeA" pull >/dev/null
+  rc=$?
+  content="$(git -C "$origin" show main:projects/d.md 2>/dev/null)"
+  [ "$rc" -eq 0 ] || { ok=0; detail="$detail rc=$rc;"; }
+  printf '%s' "$content" | grep -q "never pushed" || { ok=0; detail="$detail stranded commit not on origin/main;"; }
+  [ -f "$nodeA/ALERT.md" ] && { ok=0; detail="$detail unexpected ALERT.md;"; }
+  case "$(cat "$nodeA/.git/engram-state" 2>/dev/null)" in
+    ok\ *) : ;;
+    *) ok=0; detail="$detail engram-state not ok;" ;;
+  esac
+  if [ "$ok" = 1 ]; then
+    pass "16a drain on pull (stranded commit reaches origin/main, state ok, no alert)"
+  else
+    fail "16a drain on pull" "$detail"
+  fi
+
+  # read-only node with a local commit: pull must not push it
+  echo "read-only local note" > "$nodeB/projects/r.md"
+  q git -C "$nodeB" add projects
+  q git -C "$nodeB" commit -q -m "local only"
+  : > "$nodeB/.git/engram-readonly"
+  q git -C "$nodeB" remote set-url --push origin DISABLED
+  run_sync "$nodeB" pull >/dev/null
+  rc=$?
+  ok=1; detail=""
+  [ "$rc" -eq 0 ] || { ok=0; detail="$detail rc=$rc;"; }
+  if git -C "$origin" show main:projects/r.md >/dev/null 2>&1; then
+    ok=0; detail="$detail read-only node's commit reached origin;"
+  fi
+  [ -f "$nodeB/ALERT.md" ] && { ok=0; detail="$detail unexpected ALERT.md on read-only node;"; }
+  if [ "$ok" = 1 ]; then
+    pass "16b drain skipped on read-only node"
+  else
+    fail "16b drain skipped on read-only node" "$detail"
+  fi
 }
 
 # ===========================================================================
@@ -639,6 +741,7 @@ main() {
   test_allowlist
   test_secret_scan
   test_union_merge
+  test_union_merge_memory_paths
   test_conflict_escalation
   test_alert_surfaces_on_pull
   test_lock
@@ -649,6 +752,7 @@ main() {
   test_secret_marker
   test_no_origin
   test_consolidate_nudge
+  test_drain_on_pull
 
   echo
   echo "== summary: $PASS passed, $FAIL failed (of $((PASS+FAIL)) checks) =="
