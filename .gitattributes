@@ -8,3 +8,4 @@ projects/** merge=union
 global/** merge=union
 inbox/** merge=union
 archive/** merge=union
+vault/** merge=union

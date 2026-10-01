@@ -44,7 +44,11 @@ if ($Allowlist.Count -eq 0) { $Allowlist = $AllowlistDefault }
 # --- section 1: guards - apply to every remote git operation ---
 $env:GIT_TERMINAL_PROMPT = '0'
 $env:GCM_INTERACTIVE     = 'never'
-$env:GIT_SSH_COMMAND     = 'ssh -o BatchMode=yes -o ConnectTimeout=10'
+# GIT_SSH_COMMAND overrides core.sshCommand, so carry a configured one (a deploy key)
+# into the guard instead of replacing it.
+$sshCmd = [string](& git config --get core.sshCommand 2>$null | Select-Object -First 1)
+if (-not $sshCmd) { $sshCmd = 'ssh' }
+$env:GIT_SSH_COMMAND     = "$sshCmd -o BatchMode=yes -o ConnectTimeout=10"
 
 # per-invocation config for remote ops (pull/push); local-only git commands don't need it.
 function Invoke-GitRemote { & git -c credential.interactive=false -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=15 @args }

@@ -201,6 +201,21 @@ class TestEngramCli(unittest.TestCase):
         self.assertNotIn('trailing', text)
         self.assertEqual(self.cli.get_allowlist(), ['index.md', 'vault', 'notes'])
 
+    def test_cli_include_into_conf_naming_no_path_keeps_defaults(self):
+        # sync falls back to the defaults for a conf with no entries; include must add to that list
+        conf = self.repo / 'scripts' / 'sync-paths.conf'
+        conf.write_text("# only comments\n", encoding='utf-8')
+        self.assertEqual(self.cli.get_allowlist(), self.cli.DEFAULT_SYNCED)
+        self.cli.cmd_include(self.cli.build_parser().parse_args(['include', 'notes']))
+        self.assertEqual(self.cli.get_allowlist(), self.cli.DEFAULT_SYNCED + ['notes'])
+        self.assertIn('# only comments', conf.read_text(encoding='utf-8'))
+
+    def test_cli_default_allowlist_matches_sync_scripts(self):
+        sh = (SCRIPTS_DIR / 'sync.sh').read_text(encoding='utf-8')
+        ps1 = (SCRIPTS_DIR / 'sync.ps1').read_text(encoding='utf-8')
+        self.assertIn('ALLOWLIST_DEFAULT="%s"' % ' '.join(self.cli.DEFAULT_SYNCED), sh)
+        self.assertIn('@(%s)' % ', '.join("'%s'" % d for d in self.cli.DEFAULT_SYNCED), ps1)
+
     def _record_platform_calls(self):
         calls = []
         self.cli.run_platform_script = lambda name, args=(): calls.append((name, list(args))) or 0
@@ -217,6 +232,14 @@ class TestEngramCli(unittest.TestCase):
         self.cli.main(['pull'])
         self.cli.main(['push'])
         self.assertEqual(calls, [('sync', ['push']), ('sync', ['pull']), ('sync', ['push'])])
+
+    def test_cli_sync_rejects_unknown_leg(self):
+        import contextlib
+        import io
+        calls = self._record_platform_calls()
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.cli.main(['sync', 'pul'])
+        self.assertEqual(calls, [])
 
     def test_cli_doctor_status_delegates_to_platform_script(self):
         calls = self._record_platform_calls()
