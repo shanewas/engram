@@ -3,7 +3,7 @@
 *.ps1 text eol=crlf
 # Memory paths union-merge: same-line edits on two machines keep both lines
 # instead of blocking the node (docs/sync-contract.md §3). Consolidate dedupes.
-index.md merge=union
+/index.md merge=union
 projects/** merge=union
 global/** merge=union
 inbox/** merge=union
