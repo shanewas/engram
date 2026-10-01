@@ -101,8 +101,9 @@ jq empty "$SET" >/dev/null 2>&1 || {
 # SessionStart: synchronous pull, bounded by the hook's own timeout (20s).
 # SessionEnd: detached push — setsid+nohup+& so the hook returns instantly and
 # the push survives the hook process being torn down (see docs/sync-contract.md §8).
+# macOS ships no setsid: fall back to nohup alone (best-effort; cron is the guarantee).
 PULL_CMD="bash \"$DIR/scripts/sync.sh\" pull"
-PUSH_CMD="setsid nohup bash \"$DIR/scripts/sync.sh\" push >/dev/null 2>&1 &"
+PUSH_CMD="f=\"$DIR/scripts/sync.sh\"; if command -v setsid >/dev/null 2>&1; then setsid nohup bash \"\$f\" push >/dev/null 2>&1 & else nohup bash \"\$f\" push >/dev/null 2>&1 & fi"
 
 tmp="$(mktemp)"
 jq \

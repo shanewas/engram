@@ -30,6 +30,21 @@ Bar: *one command per machine, plain words, never needs to know what git is.* Ev
 | 12 | Claude-driven install: `SETUP-PROMPT.md` — paste into Claude Code on a new machine, zero terminal knowledge needed | ✅ done |
 | 13 | Maintenance nudge: successful pull reminds "consolidate memory" when `archive/consolidate-log.md`'s last entry is ≥ 7 days old | ✅ done |
 
+## Tier 4 — no babysitting
+
+Every item removes a point where a human had to notice something and act.
+
+| # | Item | Status |
+|---|---|---|
+| 14 | Union merge on every memory path (`index.md`, `projects/`, `global/`, `archive/`, not just `inbox/`): same-line edits on two machines keep both lines instead of blocking the node behind an `ALERT.md`; only modify/delete still escalates | ✅ done |
+| 15 | Drain on pull: a SessionEnd push that committed but died before the network push is finished by the next SessionStart pull | ✅ done |
+| 16 | Offline is not silent: a failed pull/push prints one `[engram] memory did not sync (offline?)` line into the session, so the model knows memory may be stale | ✅ done |
+| 17 | `engram sync` actually pushes (it only pulled), `engram doctor --status` works, `engram include/exclude` keep the conf's comments, `engram restore` finds the runbook, `bin/engram` is a launcher only (the bash verbs had drifted) | ✅ done |
+| 18 | macOS: no GNU `date -d`, no `setsid` — both handled | ✅ done |
+| 19 | `engram init <hub-url>`: one idempotent command replacing the five setup/bootstrap scripts (clone, connect --all, hooks, cron/task, machines.md) | open |
+| 20 | `engram doctor --fix`: every WARN/FAIL with a mechanical remedy (hooks, cron, skills, import line) applies it | open |
+| 21 | Scheduled consolidate: weekly `claude -p "consolidate memory"` from cron/task, so the dedupe/archive pass needs nobody | open |
+
 ## Deliberately not doing
 
 GUI app, background daemon, database, web service. The durability story is "plain markdown + git, cron is the only moving part" — everything above stays inside that envelope.
@@ -37,5 +52,4 @@ GUI app, background daemon, database, web service. The durability story is "plai
 ## Open / next
 
 - `doctor --status` as a rendered HTML page (optional, low priority).
-- macOS support: `sync.sh` lock staleness uses GNU `date -d`; single known upgrade point.
-- PowerShell test parity for the new behaviors must be verified on a Windows node: `SYNC_IMPL=ps1 scripts/test-sync.sh`.
+- PowerShell test parity for every tier-4 behaviour must be verified on a Windows node: `SYNC_IMPL=ps1 scripts/test-sync.sh` (tests 5b, 10, 16a/b are new).

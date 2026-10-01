@@ -49,16 +49,25 @@ except ImportError:
     from harnesses import HarnessManager, collect_available_skills
 
 
+def _conf_lines():
+    """sync-paths.conf verbatim (comments kept); the default list if it does not exist."""
+    if CONF_FILE.exists():
+        return CONF_FILE.read_text(encoding='utf-8', errors='replace').splitlines()
+    return list(DEFAULT_SYNCED)
+
+
+def _conf_entry(line):
+    return line.split('#', 1)[0].strip()
+
+
 def get_allowlist():
-    """Read sync allowlist from scripts/sync-paths.conf."""
-    if not CONF_FILE.exists():
-        return list(DEFAULT_SYNCED)
+    """Sync allowlist, parsed exactly like sync.sh/sync.ps1 do (contract §3)."""
     out = []
-    with open(CONF_FILE, encoding='utf-8', errors='replace') as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#'):
-                out.append(line)
+    for line in _conf_lines():
+        p = _conf_entry(line)
+        if not p or p.startswith(('/', '\\')) or '..' in p or re.match(r'^[A-Za-z]:', p):
+            continue
+        out.append(p)
     return out if out else list(DEFAULT_SYNCED)
 
 
@@ -82,16 +91,26 @@ def run_git(args, cwd=None, capture=False):
     return res.returncode, (res.stdout or '').strip(), (res.stderr or '').strip()
 
 
-def run_sync_script(verb, extra_args=None):
-    """Delegate to normative platform sync script (sync.ps1 on Windows, sync.sh on POSIX)."""
-    extra = extra_args or []
+def run_platform_script(name, args=()):
+    """Run scripts/<name>.ps1 on Windows, scripts/<name>.sh elsewhere (sync, doctor)."""
     if os.name == 'nt':
-        script = REPO_ROOT / 'scripts' / 'sync.ps1'
-        cmd = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script), verb] + extra
+        script = REPO_ROOT / 'scripts' / f'{name}.ps1'
+        cmd = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script)] + list(args)
     else:
-        script = REPO_ROOT / 'scripts' / 'sync.sh'
-        cmd = ['bash', str(script), verb] + extra
+        script = REPO_ROOT / 'scripts' / f'{name}.sh'
+        cmd = ['bash', str(script)] + list(args)
     return subprocess.run(cmd, cwd=str(REPO_ROOT)).returncode
+
+
+def cmd_sync(args):
+    """Pull then push; `engram sync pull|push` runs one leg only."""
+    legs = ['pull', 'push']
+    if args.args and args.args[0] in legs:
+        legs = [args.args[0]]
+    rc = 0
+    for leg in legs:
+        rc = run_platform_script('sync', [leg]) or rc
+    return rc
 
 
 # --- Command Handlers ---
@@ -158,7 +177,8 @@ def cmd_include(args):
     if not args.paths:
         print('Usage: engram include <path> [path...]')
         return 1
-    allow = get_allowlist()
+    lines = _conf_lines()
+    allow = {_conf_entry(l) for l in lines}
     added = []
     for p in args.paths:
         p_clean = p.strip().strip('/\\')
@@ -168,11 +188,12 @@ def cmd_include(args):
         if p_clean in allow:
             print(f'  Already in allowlist: {p_clean}')
         else:
-            allow.append(p_clean)
+            lines.append(p_clean)
+            allow.add(p_clean)
             added.append(p_clean)
             print(f'  + Added to allowlist: {p_clean}')
     if added:
-        CONF_FILE.write_text('\n'.join(allow) + '\n', encoding='utf-8')
+        CONF_FILE.write_text('\n'.join(lines) + '\n', encoding='utf-8')
         print(f'Updated {CONF_FILE}. Commit this file to sync across nodes:')
         print(f'  git -C "{REPO_ROOT}" add scripts/sync-paths.conf && git commit -m "sync: include {" ".join(added)}"')
     return 0
@@ -183,18 +204,18 @@ def cmd_exclude(args):
     if not args.paths:
         print('Usage: engram exclude <path> [path...]')
         return 1
-    allow = get_allowlist()
+    lines = _conf_lines()
     removed = []
     for p in args.paths:
         p_clean = p.strip().strip('/\\')
-        if p_clean in allow:
-            allow.remove(p_clean)
+        if p_clean in {_conf_entry(l) for l in lines}:
+            lines = [l for l in lines if _conf_entry(l) != p_clean]
             removed.append(p_clean)
             print(f'  - Removed from allowlist: {p_clean}')
         else:
             print(f'  Not in allowlist: {p_clean}')
     if removed:
-        CONF_FILE.write_text('\n'.join(allow) + '\n', encoding='utf-8')
+        CONF_FILE.write_text('\n'.join(lines) + '\n', encoding='utf-8')
         print(f'Updated {CONF_FILE}. Commit this file to sync across nodes.')
     return 0
 
@@ -434,32 +455,11 @@ def cmd_dotfiles(args):
 
 
 def cmd_doctor(args):
-    """Run comprehensive health check on repo, remotes, dotfiles, and harnesses."""
-    print('=== Engram Health Check ===\n')
-    bad = 0
+    """Platform doctor script (git, hub, hooks, skills, cron, sync state), then dotfiles and harnesses."""
+    if args.status:
+        return run_platform_script('doctor', ['-Status' if os.name == 'nt' else '--status'])
+    bad = 1 if run_platform_script('doctor') else 0
 
-    # 1. Check Git
-    code, rem, _ = run_git(['remote', 'get-url', 'origin'], capture=True)
-    if code == 0 and rem:
-        print(f'PASS origin remote configured: {rem}')
-    else:
-        print('FAIL origin remote not configured or unreachable')
-        bad += 1
-
-    # 2. Check ALERT.md
-    if ALERT_FILE.exists():
-        print(f'FAIL ALERT.md exists at {ALERT_FILE}')
-        bad += 1
-    else:
-        print('PASS no ALERT.md present')
-
-    # 3. Check Sync Allowlist
-    if CONF_FILE.exists():
-        print(f'PASS sync-paths.conf exists ({len(get_allowlist())} paths)')
-    else:
-        print('WARN sync-paths.conf missing, using defaults')
-
-    # 4. Check Dotfiles Status
     dotfiles_py = REPO_ROOT / 'scripts' / 'dotfiles.py'
     if dotfiles_py.exists():
         print('\nChecking dotfiles integrity:')
@@ -484,7 +484,7 @@ def cmd_doctor(args):
 
 def cmd_restore(args):
     """Print disaster-recovery runbook."""
-    runbook = REPO_ROOT / 'restore' / 'RESTORE-memory.md'
+    runbook = REPO_ROOT / 'restore' / 'README.md'
     if runbook.exists():
         print(f'Disaster-Recovery Runbook ({runbook}):\n')
         with open(runbook, encoding='utf-8') as f:
@@ -495,7 +495,7 @@ def cmd_restore(args):
                 print(line.rstrip())
         print(f'\nFull runbook: {runbook}')
     else:
-        print('restore/RESTORE-memory.md not found.')
+        print('restore/README.md not found.')
     return 0
 
 
@@ -510,7 +510,7 @@ def build_parser():
 
     # sync / pull / push
     s_sync = sub.add_parser('sync', help='Pull then push memory safely')
-    s_sync.add_argument('args', nargs=argparse.REMAINDER, help='Additional arguments')
+    s_sync.add_argument('args', nargs=argparse.REMAINDER, help='pull | push (default: both)')
     sub.add_parser('pull', help='Pull memory from remote')
     sub.add_parser('push', help='Push memory to remote')
 
@@ -572,9 +572,9 @@ def main(argv=None):
 
     dispatch = {
         'status': cmd_status,
-        'sync': lambda a: run_sync_script('sync', getattr(a, 'args', [])),
-        'pull': lambda a: run_sync_script('pull'),
-        'push': lambda a: run_sync_script('push'),
+        'sync': cmd_sync,
+        'pull': lambda a: run_platform_script('sync', ['pull']),
+        'push': lambda a: run_platform_script('sync', ['push']),
         'paths': cmd_paths,
         'include': cmd_include,
         'exclude': cmd_exclude,
@@ -599,4 +599,9 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except BrokenPipeError:
+        # `engram audit | head` — the reader went away, nothing to report
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        sys.exit(0)

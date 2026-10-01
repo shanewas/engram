@@ -64,6 +64,10 @@ git_remote() {
 }
 
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+# ISO-8601 UTC -> epoch seconds. GNU date (-d) first, BSD/macOS date (-j -f) second.
+iso_to_epoch() {
+  date -u -d "$1" +%s 2>/dev/null || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null
+}
 
 # hostname, sanitized: lowercase, anything not [a-z0-9-] becomes '-'
 HOST="$(hostname 2>/dev/null || printf '%s' "${HOSTNAME:-}")"
@@ -98,7 +102,7 @@ acquire_lock() {
 
   local ts lock_epoch now_epoch age
   ts="$(awk '{print $2; exit}' "$LOCKFILE" 2>/dev/null)"
-  lock_epoch="$(date -u -d "$ts" +%s 2>/dev/null)" || lock_epoch=0
+  lock_epoch="$(iso_to_epoch "$ts")" || lock_epoch=0
   now_epoch="$(date -u +%s)"
   age=$(( now_epoch - lock_epoch ))
 
@@ -313,12 +317,29 @@ consolidate_nudge() {
   [ -f "$log" ] || return 0
   last="$(grep -Eo '^- [0-9]{4}-[0-9]{2}-[0-9]{2}' "$log" 2>/dev/null | tail -1 | cut -c3-)"
   [ -n "$last" ] || return 0
-  last_epoch="$(date -u -d "$last" +%s 2>/dev/null)" || return 0
+  last_epoch="$(iso_to_epoch "${last}T00:00:00Z")" || return 0
   now_epoch="$(date -u +%s)"
   age_days=$(( (now_epoch - last_epoch) / 86400 ))
   if [ "$age_days" -ge "$NUDGE_DAYS" ]; then
     printf '[engram] Last memory consolidation was %s days ago — say "consolidate memory" when convenient.\n' "$age_days"
   fi
+}
+
+# Drain (§4 pull): a SessionEnd push that committed but died before reaching the
+# hub leaves commits only this node holds. The pull just rebased them onto
+# origin/main, so pushing is safe; costs nothing when there is nothing to push.
+drain_unpushed() {
+  [ -e "$READONLY_MARKER" ] && return 0
+  local ahead out
+  ahead="$(git rev-list --count '@{u}..HEAD' 2>/dev/null)" || return 0
+  [ "${ahead:-0}" -gt 0 ] || return 0
+  out="$(git_remote push 2>&1)" || escalate "pull: draining ${ahead} unpushed commit(s) failed: ${out:0:200}"
+}
+
+# A transient failure is not escalated, but it is not silent either: one line
+# on stdout reaches the session context, so the model knows memory may be stale.
+report_offline() {
+  printf '[engram] memory did not sync (offline?): %s\n' "$(printf '%s\n' "$1" | sed '/^$/d' | head -1)"
 }
 
 if [ "$MODE" = "pull" ]; then
@@ -328,6 +349,7 @@ if [ "$MODE" = "pull" ]; then
       refresh_skills
       rm -f "$ALERTFILE" 2>/dev/null || true
       set_state_ok
+      drain_unpushed
       consolidate_nudge
       ;;
     1)
@@ -335,6 +357,7 @@ if [ "$MODE" = "pull" ]; then
       ;;
     2)
       set_state_err "pull failed: ${PULL_OUTPUT:0:200}"
+      report_offline "$PULL_OUTPUT"
       ;;
   esac
 else
@@ -378,6 +401,7 @@ else
           ;;
         2)
           set_state_err "push: pre-push pull failed: ${PULL_OUTPUT:0:200}"
+          report_offline "$PULL_OUTPUT"
           ;;
       esac
     fi

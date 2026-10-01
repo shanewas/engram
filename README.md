@@ -135,7 +135,7 @@ Engram ships with skills that teach your agents how to manage memory:
 
 - **Secret scanner before commit**: Engram scans staged diffs for private keys, API tokens, and passwords before every push. If a secret is detected, it unstages the files and alerts you. It will never push keys to GitHub.
 - **Sync never interrupts your work**: Automated hooks always exit with code 0. If GitHub is unreachable or credentials need updating, the script records the error and lets you continue coding uninterrupted.
-- **Merge conflicts never lose data**: If two computers edit memory at the same time and rebase conflicts, Engram force-pushes your local work to a separate `conflict/<machine>` branch and creates an `ALERT.md` note. Nothing is overwritten or deleted.
+- **Merge conflicts never lose data**: memory files use git union merge, so two computers editing the same line keep both versions and sync carries on; the weekly consolidate run dedupes. The one case that still conflicts (one machine archived a file another one edited) force-pushes your local work to a separate `conflict/<machine>` branch and creates an `ALERT.md` note. Nothing is overwritten or deleted.
 
 ---
 

@@ -56,6 +56,8 @@ index.md  projects/  global/  inbox/  archive/
 
 The conf itself lives under `scripts/` and is therefore *code*: changing what syncs always requires a deliberate manual commit. Changes to `scripts/`, `CLAUDE.md`, `PLAN.md`, `docs/`, `.claude/` are likewise code, not memory: they require a deliberate manual commit. `consolidate` surfaces untracked strays.
 
+**Union merge.** `.gitattributes` marks every memory path (`index.md`, `projects/**`, `global/**`, `inbox/**`, `archive/**`) `merge=union`. When two nodes change the same lines, the rebase keeps both versions in order instead of stopping: a duplicate or stale line is a consolidate-time cleanup, a blocked node is data loss waiting to happen. What still conflicts, and escalates per §5: modify/delete (one node archived or deleted a file another node edited) and anything outside the memory paths, which is code and is committed by hand anyway.
+
 ## 4. Modes
 
 **Step 0, both modes** (after lock + self-heal): no `origin` remote configured → print a plain-language NOT CONNECTED warning to stdout (the SessionStart hook injects it into the session context), state = err (`no origin remote configured`), then skip to the final alert-print step and exit 0. A node with no remote is a standing configuration failure — it must never sit quiet while memory accumulates locally.
@@ -65,9 +67,9 @@ The conf itself lives under `scripts/` and is therefore *code*: changing what sy
 1. Acquire lock (held → exit 0).
 2. Self-heal: if `.git/rebase-merge` or `.git/rebase-apply` exists → `git rebase --abort`.
 3. `git pull --rebase --autostash` (guarded).
-   - success → refresh skills (§6); delete `ALERT.md`; state = ok; **maintenance nudge**: if `archive/consolidate-log.md` exists and its last `- YYYY-MM-DD` entry is ≥ 7 days old, print a one-line "say consolidate memory" reminder to stdout. No log file → no nudge.
+   - success → refresh skills (§6); delete `ALERT.md`; state = ok; **drain**: if HEAD is ahead of `@{u}` (a previous push committed, then died before reaching the hub), `git push` (guarded) — the rebase just put those commits on top of origin/main, so this is safe; failure → **escalate** (§5); skipped on read-only nodes; **maintenance nudge**: if `archive/consolidate-log.md` exists and its last `- YYYY-MM-DD` entry is ≥ 7 days old, print a one-line "say consolidate memory" reminder to stdout. No log file → no nudge.
    - conflict → `git rebase --abort`; **escalate** (§5).
-   - network/auth failure → state = err. No escalation (transient; not divergence).
+   - network/auth failure → state = err; print one line to stdout: `[engram] memory did not sync (offline?): <first non-empty line of git output>`. No escalation (transient; not divergence) — but not silent either: the SessionStart hook puts that line in front of the model, so it knows memory may be stale.
 4. If `ALERT.md` exists, **print its contents to stdout**. SessionStart hook stdout is injected into the session context — this is how the model itself learns the node is broken.
 5. `exit 0`.
 
@@ -79,7 +81,7 @@ The conf itself lives under `scripts/` and is therefore *code*: changing what sy
 3. `git add --` over the allowlist (skip paths that don't exist).
 4. **Secret scan** `git diff --cached` (§7). Hit → `git reset` (unstage), write `ALERT.md`, exit 0. Never commit a suspected secret.
 5. Commit if the staged diff is non-empty. Message: `sync(<host>): <iso8601>`.
-6. `git pull --rebase --autostash` (guarded). Conflict → `rebase --abort`; **escalate**; exit 0.
+6. `git pull --rebase --autostash` (guarded). Conflict → `rebase --abort`; **escalate**; exit 0. Network/auth failure → state = err, print the same one-liner as pull step 3; exit 0.
 7. `git push` (guarded). Failure → **escalate**; exit 0.
 8. Delete `ALERT.md`; state = ok; `exit 0`.
 
@@ -122,7 +124,7 @@ The allowlist bounds *which files* sync; the scan catches a secret pasted *into*
 | Hook | Command | Why |
 |---|---|---|
 | SessionStart | `sync pull`, synchronous, `timeout: 20` | Must finish before the session works; bounded so it can't wedge startup. |
-| SessionEnd | `sync push`, **detached/fire-and-forget** | SessionEnd hooks can be killed before a network push completes. Detaching makes truncation irrelevant: the hook returns instantly, the push outlives it. |
+| SessionEnd | `sync push`, **detached/fire-and-forget** (`setsid nohup … &`; plain `nohup … &` where `setsid` is missing, e.g. macOS) | SessionEnd hooks can be killed before a network push completes. Detaching makes truncation irrelevant: the hook returns instantly, the push outlives it. If it still dies, the next pull's drain step finishes the job. |
 | Scheduled (30 min) | `sync push` | The real durability guarantee. Treat SessionEnd as best-effort. |
 
 ## 9. Known Claude Code behaviours designed around
