@@ -571,6 +571,43 @@ test_drain_on_pull() {
 }
 
 # ===========================================================================
+# 17. core.sshCommand kept: the ssh guard appends BatchMode/ConnectTimeout to
+#     the repo's own ssh command (a deploy key) instead of replacing it
+# ===========================================================================
+test_ssh_command_kept() {
+  local base="$WORK/t17" origin nodeA log
+  make_world "$base"
+  origin="$base/origin.git"; nodeA="$base/nodeA"; log="$base/ssh.log"
+
+  # stand-in for ssh: logs its argv, then runs the remote git command (its
+  # last argument) locally against the bare hub
+  mkdir -p "$base/fakessh"
+  {
+    echo '#!/bin/sh'
+    echo "printf '%s\\n' \"\$*\" >> \"$log\""
+    echo 'for last; do :; done'
+    echo 'exec sh -c "$last"'
+  } > "$base/fakessh/ssh"
+  chmod +x "$base/fakessh/ssh"
+  git -C "$nodeA" config core.sshCommand "$base/fakessh/ssh -i $base/deploy_key"
+  git -C "$nodeA" remote set-url origin "ssh://fakehost$origin"
+
+  echo "pushed over the deploy key" > "$nodeA/projects/s.md"
+  local rc ok=1 detail=""
+  run_sync "$nodeA" push "$SYNC_BUDGET" >/dev/null 2>&1
+  rc=$?
+  [ "$rc" -eq 0 ] || { ok=0; detail="$detail rc=$rc;"; }
+  git -C "$origin" show main:projects/s.md 2>/dev/null | grep -q "deploy key" || { ok=0; detail="$detail push did not reach origin;"; }
+  grep -q -- "-i $base/deploy_key" "$log" 2>/dev/null || { ok=0; detail="$detail core.sshCommand not used;"; }
+  grep -q -- "BatchMode=yes" "$log" 2>/dev/null || { ok=0; detail="$detail BatchMode guard missing;"; }
+  if [ "$ok" = 1 ]; then
+    pass "17 core.sshCommand kept (deploy-key command carries the push, guard options appended)"
+  else
+    fail "17 core.sshCommand kept" "$detail ssh log: [$(head -3 "$log" 2>/dev/null | tr '\n' '|')]"
+  fi
+}
+
+# ===========================================================================
 # 11. exit 0 always: not a git repo at all
 # ===========================================================================
 test_not_a_git_repo() {
@@ -753,6 +790,7 @@ main() {
   test_no_origin
   test_consolidate_nudge
   test_drain_on_pull
+  test_ssh_command_kept
 
   echo
   echo "== summary: $PASS passed, $FAIL failed (of $((PASS+FAIL)) checks) =="

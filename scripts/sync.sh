@@ -55,7 +55,9 @@ load_allowlist
 # ---------------------------------------------------------------------------
 export GIT_TERMINAL_PROMPT=0
 export GCM_INTERACTIVE=never
-export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10"
+# GIT_SSH_COMMAND overrides core.sshCommand, so carry a configured one (a deploy
+# key) into the guard instead of replacing it.
+export GIT_SSH_COMMAND="$(git config --get core.sshCommand 2>/dev/null || echo ssh) -o BatchMode=yes -o ConnectTimeout=10"
 
 # per-invocation config for remote ops (pull/push/ls-remote); local-only git
 # commands (add/commit/diff/reset/rebase --abort) don't need these.

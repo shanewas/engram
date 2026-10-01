@@ -67,7 +67,9 @@ info() { printf '[INFO] %s\n' "$1"; }
 
 export GIT_TERMINAL_PROMPT=0
 export GCM_INTERACTIVE=never
-export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10"
+# GIT_SSH_COMMAND overrides core.sshCommand, so carry a configured one (a deploy
+# key) into the guard instead of replacing it.
+export GIT_SSH_COMMAND="$(git config --get core.sshCommand 2>/dev/null || echo ssh) -o BatchMode=yes -o ConnectTimeout=10"
 
 echo "engram doctor — $DIR"
 echo
@@ -216,6 +218,15 @@ if [ -f "$DIR/index.md" ]; then
   else
     pass "index.md is $lines lines (<= 100)"
   fi
+fi
+
+# 10. dotfiles: live configs match their templates (doctor.ps1 runs the same) -----
+echo "--- dotfiles ---"
+py="$(command -v python3 || command -v python)"
+if [ -n "$py" ]; then
+  "$py" -X utf8 "$DIR/scripts/dotfiles.py" doctor || FAILURES=$((FAILURES+1))
+else
+  warn "dotfiles: no python on PATH, check skipped"
 fi
 
 echo

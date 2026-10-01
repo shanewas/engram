@@ -18,8 +18,10 @@ Environment:
 ```
 GIT_TERMINAL_PROMPT=0
 GCM_INTERACTIVE=never
-GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=10
+GIT_SSH_COMMAND=<ssh> -o BatchMode=yes -o ConnectTimeout=10
 ```
+
+`<ssh>` is the repo's `core.sshCommand` when one is set, plain `ssh` otherwise. `GIT_SSH_COMMAND` overrides `core.sshCommand`, so a guard that hardcoded `ssh` would drop a per-repo deploy key and every remote op would fail auth.
 
 Per-invocation config (`git -c ... <cmd>`):
 
@@ -48,15 +50,15 @@ http.lowSpeedTime=15
 | `scripts/sync-paths.conf` | the commit allowlist — one path per line, `#` comments |
 | `archive/consolidate-log.md` | appended by the `consolidate` skill (`- YYYY-MM-DD <host>` per run); drives the maintenance nudge (§4 pull) |
 
-Commit allowlist — nothing else is ever staged. Read from `scripts/sync-paths.conf` (one path per line, relative to the repo root, `#` starts a comment); entries that are absolute or contain `..` are ignored. If the conf is missing or yields no entries, the built-in default applies — which is the same list the shipped conf contains:
+Commit allowlist — nothing else is ever staged. Read from `scripts/sync-paths.conf` (one path per line, relative to the repo root, `#` starts a comment); entries that are absolute or contain `..` are ignored. If the conf is missing or yields no entries, the built-in default applies (`index.md projects/ global/ inbox/ archive/`). The shipped conf is that list plus `vault/`, an optional file-backed memory bank for a vault MCP server:
 
 ```
-index.md  projects/  global/  inbox/  archive/
+index.md  projects/  global/  inbox/  archive/  vault/
 ```
 
 The conf itself lives under `scripts/` and is therefore *code*: changing what syncs always requires a deliberate manual commit. Changes to `scripts/`, `CLAUDE.md`, `PLAN.md`, `docs/`, `.claude/` are likewise code, not memory: they require a deliberate manual commit. `consolidate` surfaces untracked strays.
 
-**Union merge.** `.gitattributes` marks every memory path (`index.md`, `projects/**`, `global/**`, `inbox/**`, `archive/**`) `merge=union`. When two nodes change the same lines, the rebase keeps both versions in order instead of stopping: a duplicate or stale line is a consolidate-time cleanup, a blocked node is data loss waiting to happen. What still conflicts, and escalates per §5: modify/delete (one node archived or deleted a file another node edited) and anything outside the memory paths, which is code and is committed by hand anyway.
+**Union merge.** `.gitattributes` marks every memory path (`index.md`, `projects/**`, `global/**`, `inbox/**`, `archive/**`, `vault/**`) `merge=union`. When two nodes change the same lines, the rebase keeps both versions in order instead of stopping: a duplicate or stale line is a consolidate-time cleanup, a blocked node is data loss waiting to happen. Consolidate dedupes `projects/`, `global/` and `index.md`; nothing dedupes `vault/`, so a doubled line there stays until someone removes it. What still conflicts, and escalates per §5: modify/delete (one node archived or deleted a file another node edited) and anything outside the memory paths, which is code and is committed by hand anyway.
 
 ## 4. Modes
 

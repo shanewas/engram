@@ -13,6 +13,7 @@ _resolve_root() {
   echo ""; return 1
 }
 ROOT="$(_resolve_root)" || { echo "engram: no repo found (set ENGRAM_HOME or clone to ~/engram)" >&2; exit 1; }
+export ENGRAM_HOME="$ROOT"   # engram_cli.py resolves its root from this; keep both on the same repo
 
 for py in python3 python; do
   if command -v "$py" >/dev/null 2>&1; then

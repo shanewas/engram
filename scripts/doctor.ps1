@@ -83,7 +83,11 @@ if (Test-Path (Join-Path $repo '.git')) {
 # 2. origin configured + reachable ---------------------------------------------
 $env:GIT_TERMINAL_PROMPT = '0'
 $env:GCM_INTERACTIVE     = 'never'
-$env:GIT_SSH_COMMAND     = 'ssh -o BatchMode=yes -o ConnectTimeout=10'
+# GIT_SSH_COMMAND overrides core.sshCommand, so carry a configured one (a deploy key)
+# into the guard instead of replacing it.
+$sshCmd = [string](& git config --get core.sshCommand 2>$null | Select-Object -First 1)
+if (-not $sshCmd) { $sshCmd = 'ssh' }
+$env:GIT_SSH_COMMAND     = "$sshCmd -o BatchMode=yes -o ConnectTimeout=10"
 
 $originUrl = git remote get-url origin 2>$null
 if ($LASTEXITCODE -eq 0 -and $originUrl) {

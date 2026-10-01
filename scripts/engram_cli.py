@@ -39,7 +39,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = Path(os.environ.get('ENGRAM_HOME') or os.environ.get('DOTFILES_REPO') or SCRIPTS_DIR.parent)
 CONF_FILE = REPO_ROOT / 'scripts' / 'sync-paths.conf'
 ALERT_FILE = REPO_ROOT / 'ALERT.md'
-DEFAULT_SYNCED = ['index.md', 'projects', 'global', 'inbox', 'archive', 'vault']
+DEFAULT_SYNCED = ['index.md', 'projects', 'global', 'inbox', 'archive']  # = sync.sh/sync.ps1 default
 
 # Import harness manager
 try:
@@ -49,26 +49,26 @@ except ImportError:
     from harnesses import HarnessManager, collect_available_skills
 
 
-def _conf_lines():
-    """sync-paths.conf verbatim (comments kept); the default list if it does not exist."""
-    if CONF_FILE.exists():
-        return CONF_FILE.read_text(encoding='utf-8', errors='replace').splitlines()
-    return list(DEFAULT_SYNCED)
-
-
 def _conf_entry(line):
-    return line.split('#', 1)[0].strip()
+    """Path a conf line names; '' for comments, blanks and entries sync ignores (contract §3)."""
+    p = line.split('#', 1)[0].strip()
+    if p.startswith(('/', '\\')) or '..' in p or re.match(r'^[A-Za-z]:', p):
+        return ''
+    return p
+
+
+def _conf_lines():
+    """sync-paths.conf verbatim (comments kept). A conf naming no path syncs the defaults,
+    so they are appended: include/exclude then edit what sync actually uses."""
+    lines = CONF_FILE.read_text(encoding='utf-8', errors='replace').splitlines() if CONF_FILE.exists() else []
+    if not any(map(_conf_entry, lines)):
+        lines += DEFAULT_SYNCED
+    return lines
 
 
 def get_allowlist():
-    """Sync allowlist, parsed exactly like sync.sh/sync.ps1 do (contract §3)."""
-    out = []
-    for line in _conf_lines():
-        p = _conf_entry(line)
-        if not p or p.startswith(('/', '\\')) or '..' in p or re.match(r'^[A-Za-z]:', p):
-            continue
-        out.append(p)
-    return out if out else list(DEFAULT_SYNCED)
+    """Sync allowlist (contract §3): conf entries, else the sync scripts' default list."""
+    return [p for p in map(_conf_entry, _conf_lines()) if p]
 
 
 def run_git(args, cwd=None, capture=False):
@@ -104,11 +104,8 @@ def run_platform_script(name, args=()):
 
 def cmd_sync(args):
     """Pull then push; `engram sync pull|push` runs one leg only."""
-    legs = ['pull', 'push']
-    if args.args and args.args[0] in legs:
-        legs = [args.args[0]]
     rc = 0
-    for leg in legs:
+    for leg in [args.leg] if args.leg else ['pull', 'push']:
         rc = run_platform_script('sync', [leg]) or rc
     return rc
 
@@ -455,17 +452,10 @@ def cmd_dotfiles(args):
 
 
 def cmd_doctor(args):
-    """Platform doctor script (git, hub, hooks, skills, cron, sync state), then dotfiles and harnesses."""
+    """Platform doctor script (git, hub, hooks, skills, cron, sync state, dotfiles), then harnesses."""
     if args.status:
         return run_platform_script('doctor', ['-Status' if os.name == 'nt' else '--status'])
     bad = 1 if run_platform_script('doctor') else 0
-
-    dotfiles_py = REPO_ROOT / 'scripts' / 'dotfiles.py'
-    if dotfiles_py.exists():
-        print('\nChecking dotfiles integrity:')
-        rc = subprocess.run([sys.executable, '-X', 'utf8', str(dotfiles_py), 'doctor']).returncode
-        if rc != 0:
-            bad += 1
 
     # 5. Check Harnesses
     print('\nChecking agent harnesses:')
@@ -510,7 +500,7 @@ def build_parser():
 
     # sync / pull / push
     s_sync = sub.add_parser('sync', help='Pull then push memory safely')
-    s_sync.add_argument('args', nargs=argparse.REMAINDER, help='pull | push (default: both)')
+    s_sync.add_argument('leg', nargs='?', choices=['pull', 'push'], help='run one leg only (default: pull then push)')
     sub.add_parser('pull', help='Pull memory from remote')
     sub.add_parser('push', help='Push memory to remote')
 
