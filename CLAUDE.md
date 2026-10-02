@@ -1,26 +1,21 @@
-# Engram
+# engram-sync
 
-Cross-machine memory system for Claude Code. Markdown in git; a private git hub repo (e.g. GitHub) is the hub; any mix of Windows/Linux nodes syncs around Claude Code sessions. This CLAUDE.md applies when working ON engram itself — day-to-day memory use goes through `index.md`, which is imported into every session by user-level `~/.claude/CLAUDE.md`.
+Source of the `engram-sync` PyPI package (`engram` CLI). Users' memory lives in their own private repo; this repo holds only code.
 
 ## Layout
 
-- `index.md` — master index, always loaded in every session. Keep small; it is the only always-loaded file.
-- `projects/` — one file per project (copy `_template.md`). Lazy-loaded: Claude reads them on demand.
-- `global/` — preferences, conventions, machine facts.
-- `inbox/` — append-only quick captures (`YYYY-MM.md`), merged out by the consolidate skill.
-- `archive/` — dead projects, compressed history.
-- `bin/` — cross-platform CLI entrypoints (`engram`, `engram.cmd`, `engram.ps1`).
-- `dotfiles/` — harness adapters (`harnesses.json`), MCP registry (`mcp.json.tmpl`), tool configurations.
-- `scripts/` — unified CLI engine (`engram_cli.py`), harness manager (`harnesses.py`), sync, doctor, test suite.
-- `plugins/engram/skills/` — `engram`, `remember`, `consolidate`, `migrate`; distributed to connected agent harnesses via `engram skills sync`.
-- `AGENTS.md` — standing rules for non-Claude agents joining the memory; `SETUP-PROMPT.md` — paste-into-agent installer; `docs/roadmap.md` — improvement plan + status.
+- `src/engram_sync/sync.py` — sync engine; normative spec `docs/sync-contract.md`.
+- `src/engram_sync/harnesses.py` — agent registry and connect/disconnect (skills, instruction block, Claude hooks).
+- `src/engram_sync/cli.py` — `init`, `sync`, `connect`, `disconnect`, `schedule`, `doctor`.
+- `src/engram_sync/skills/` — skills copied into every connected agent.
+- `src/engram_sync/seed/` — scaffold written into an empty memory repo by `init`. Dotfiles there must also be listed in `pyproject.toml` package-data.
+- `tests/` — hermetic unittest suites (temp bare origin, temp HOME via `ENGRAM_USER_HOME`). Never point a test at a real home or repo.
 
 ## Rules
 
-- Facts, not prose. Atomic entries, dated `YYYY-MM-DD`.
-- Size caps: `index.md` < 100 lines, each `projects/*.md` < 300 lines. The consolidate skill enforces by compressing and archiving.
-- No secrets, credentials, or tokens — ever. No employer/client-confidential material without explicit approval.
-- Sync is automatic: SessionStart pulls, SessionEnd pushes, 30-min scheduled task/cron as safety net. Manual: `engram sync push` / `engram sync pull` (or `scripts/sync.ps1` / `scripts/sync.sh`).
-- Harness management: `engram connect <harness|--all>`, `engram skills sync`, `engram mcp sync`.
-- `inbox/**` uses git union merge (never conflicts). Other files merge normally; a conflicted rebase is auto-aborted by sync and surfaces at the next consolidate run.
-- Normative sync behaviour: `docs/sync-contract.md` — the doc wins over the scripts on any disagreement. After touching either sync script, run `scripts/test-sync.sh` AND `SYNC_IMPL=ps1 scripts/test-sync.sh`; both must pass identically.
+- Stdlib only, Python 3.9+. No runtime dependencies.
+- `engram sync` must return normally on every path: it runs inside agent session hooks.
+- Never overwrite a user file or skill dir the tool did not create (instruction text lives between `engram-sync:begin/end` markers; copied skills carry a `.engram-sync` marker).
+- Changing sync behaviour means updating `docs/sync-contract.md` and `tests/test_sync.py` in the same commit.
+- Test: `python -m unittest discover -s tests -t .`
+- Release: bump `__version__` in `src/engram_sync/__init__.py`, tag `vX.Y.Z`; CI publishes via PyPI trusted publishing.

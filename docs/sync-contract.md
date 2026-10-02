@@ -1,8 +1,8 @@
 # Engram sync contract
 
-Normative spec. `scripts/sync.ps1` (Windows) and `scripts/sync.sh` (Linux) MUST implement identical behaviour. Any divergence is a bug.
+Normative spec. The implementation is `src/engram_sync/sync.py` (`engram sync pull|push`); `tests/test_sync.py` checks every rule below. Where code and this doc disagree, the code is wrong.
 
-Repo root = parent of `scripts/`. Hostname = lowercased, `[^a-z0-9-]` → `-`.
+Repo root = the memory repo (`--repo`, else `$ENGRAM_HOME`, else `~/engram`). Hostname = `$ENGRAM_HOST` or the OS hostname, lowercased, `[^a-z0-9-]` → `-`.
 
 ## Invariants
 
@@ -18,8 +18,10 @@ Environment:
 ```
 GIT_TERMINAL_PROMPT=0
 GCM_INTERACTIVE=never
-GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=10
+GIT_SSH_COMMAND=<ssh> -o BatchMode=yes -o ConnectTimeout=10
 ```
+
+`<ssh>` is the repo's `core.sshCommand` when one is set, else `ssh`. `GIT_SSH_COMMAND` overrides `core.sshCommand`, so a guard that hardcoded `ssh` would drop a per-repo deploy key and every remote op would fail auth. A node that needs a deploy key sets it once: `git config core.sshCommand "ssh -i <key> -o IdentitiesOnly=yes"`.
 
 Per-invocation config (`git -c ... <cmd>`):
 
@@ -29,7 +31,7 @@ http.lowSpeedLimit=1000
 http.lowSpeedTime=15
 ```
 
-`GIT_TERMINAL_PROMPT=0` does **not** suppress Git Credential Manager's GUI dialog — `GCM_INTERACTIVE=never` + `credential.interactive=false` are what prevent the most likely real-world hang on Windows. Do **not** wrap git in `Start-Job`/background-kill timeout wrappers: killing the wrapper orphans `git.exe`, which leaves `index.lock` and a half-finished rebase behind. The wall-clock ceiling belongs at the hook layer (`timeout` in settings.json), not in the script.
+`GIT_TERMINAL_PROMPT=0` does **not** suppress Git Credential Manager's GUI dialog — `GCM_INTERACTIVE=never` + `credential.interactive=false` are what prevent the most likely real-world hang on Windows. Do **not** wrap git in background-kill timeout wrappers: killing the wrapper orphans `git.exe`, which leaves `index.lock` and a half-finished rebase behind. The wall-clock ceiling belongs at the hook layer (`timeout` in settings.json), not in the script.
 
 ## 2. Lock
 
@@ -45,16 +47,14 @@ http.lowSpeedTime=15
 |---|---|
 | `.git/engram-state` | `ok <iso8601>` or `err <iso8601> <reason>` — last sync outcome |
 | `ALERT.md` | repo root, **gitignored**, local-only. Its existence means this node needs human/model attention. |
-| `scripts/sync-paths.conf` | the commit allowlist — one path per line, `#` comments |
+| `.engram/sync-paths.conf` | the commit allowlist — one path per line, `#` comments |
 | `archive/consolidate-log.md` | appended by the `consolidate` skill (`- YYYY-MM-DD <host>` per run); drives the maintenance nudge (§4 pull) |
 
-Commit allowlist — nothing else is ever staged. Read from `scripts/sync-paths.conf` (one path per line, relative to the repo root, `#` starts a comment); entries that are absolute or contain `..` are ignored. If the conf is missing or yields no entries, the built-in default applies — which is the same list the shipped conf contains:
+Commit allowlist — nothing else is ever staged. Read from `.engram/sync-paths.conf` (one path per line, relative to the repo root, `#` starts a comment); entries that are absolute or contain `..` are ignored. If the conf is missing or yields no entries, the built-in default applies (`index.md projects/ global/ inbox/ archive/`). `engram init` seeds exactly that default.
 
-```
-index.md  projects/  global/  inbox/  archive/
-```
+The conf itself lives under `.engram/`, outside the allowlist, so changing what syncs always requires a deliberate manual commit. The same goes for any other file outside the allowlist (`.gitattributes`, user `skills/`). `consolidate` surfaces untracked strays.
 
-The conf itself lives under `scripts/` and is therefore *code*: changing what syncs always requires a deliberate manual commit. Changes to `scripts/`, `CLAUDE.md`, `PLAN.md`, `docs/`, `.claude/` are likewise code, not memory: they require a deliberate manual commit. `consolidate` surfaces untracked strays.
+**Union merge.** `.gitattributes` marks every memory path (`index.md`, `projects/**`, `global/**`, `inbox/**`, `archive/**`) `merge=union`. When two nodes change the same lines, the rebase keeps both versions in order instead of stopping: a duplicate or stale line is a consolidate-time cleanup, a blocked node is data loss waiting to happen. Consolidate dedupes `projects/`, `global/` and `index.md`. What still conflicts, and escalates per §5: modify/delete (one node archived or deleted a file another node edited) and anything outside the memory paths, which is code and is committed by hand anyway.
 
 ## 4. Modes
 
@@ -65,9 +65,9 @@ The conf itself lives under `scripts/` and is therefore *code*: changing what sy
 1. Acquire lock (held → exit 0).
 2. Self-heal: if `.git/rebase-merge` or `.git/rebase-apply` exists → `git rebase --abort`.
 3. `git pull --rebase --autostash` (guarded).
-   - success → refresh skills (§6); delete `ALERT.md`; state = ok; **maintenance nudge**: if `archive/consolidate-log.md` exists and its last `- YYYY-MM-DD` entry is ≥ 7 days old, print a one-line "say consolidate memory" reminder to stdout. No log file → no nudge.
+   - success → refresh skills (§6); delete `ALERT.md`; state = ok; **drain**: if HEAD is ahead of `@{u}` (a previous push committed, then died before reaching the hub), `git push` (guarded) — the rebase just put those commits on top of origin/main, so this is safe; failure → **escalate** (§5); skipped on read-only nodes; **maintenance nudge**: if `archive/consolidate-log.md` exists and its last `- YYYY-MM-DD` entry is ≥ 7 days old, print a one-line "say consolidate memory" reminder to stdout. No log file → no nudge.
    - conflict → `git rebase --abort`; **escalate** (§5).
-   - network/auth failure → state = err. No escalation (transient; not divergence).
+   - network/auth failure → state = err; print one line to stdout: `[engram] memory did not sync (offline?): <first non-empty line of git output>`. No escalation (transient; not divergence) — but not silent either: the SessionStart hook puts that line in front of the model, so it knows memory may be stale.
 4. If `ALERT.md` exists, **print its contents to stdout**. SessionStart hook stdout is injected into the session context — this is how the model itself learns the node is broken.
 5. `exit 0`.
 
@@ -79,7 +79,7 @@ The conf itself lives under `scripts/` and is therefore *code*: changing what sy
 3. `git add --` over the allowlist (skip paths that don't exist).
 4. **Secret scan** `git diff --cached` (§7). Hit → `git reset` (unstage), write `ALERT.md`, exit 0. Never commit a suspected secret.
 5. Commit if the staged diff is non-empty. Message: `sync(<host>): <iso8601>`.
-6. `git pull --rebase --autostash` (guarded). Conflict → `rebase --abort`; **escalate**; exit 0.
+6. `git pull --rebase --autostash` (guarded). Conflict → `rebase --abort`; **escalate**; exit 0. Network/auth failure → state = err, print the same one-liner as pull step 3; exit 0.
 7. `git push` (guarded). Failure → **escalate**; exit 0.
 8. Delete `ALERT.md`; state = ok; `exit 0`.
 
@@ -95,7 +95,7 @@ Rationale: the failure is routed to the operator, and the operator is the model.
 
 ## 6. Skills refresh
 
-`~/.claude/skills` **must contain real directories, not symlinks/junctions** — Claude Code's skill discovery does not follow them (it will silently fail to load). Setup copies `plugins/engram/skills/*` there; every successful `pull` re-copies, so a skill edited on one machine propagates to the others.
+Harness skill roots **must contain real directories, not symlinks/junctions** — skill discovery does not follow them. `engram connect` copies the bundled skills plus the memory repo's own `skills/*/` into each connected harness; every successful `pull` re-copies them, so a skill edited on one machine reaches every harness on the others. A copied dir carries a `.engram-sync` marker file; a same-named dir without the marker belongs to the user and is never replaced.
 
 ## 7. Secret scan patterns
 
@@ -121,12 +121,12 @@ The allowlist bounds *which files* sync; the scan catches a secret pasted *into*
 
 | Hook | Command | Why |
 |---|---|---|
-| SessionStart | `sync pull`, synchronous, `timeout: 20` | Must finish before the session works; bounded so it can't wedge startup. |
-| SessionEnd | `sync push`, **detached/fire-and-forget** | SessionEnd hooks can be killed before a network push completes. Detaching makes truncation irrelevant: the hook returns instantly, the push outlives it. |
-| Scheduled (30 min) | `sync push` | The real durability guarantee. Treat SessionEnd as best-effort. |
+| SessionStart | `engram sync pull`, synchronous, `timeout: 20` | Must finish before the session works; bounded so it can't wedge startup. |
+| SessionEnd | `engram sync push --detach`: the CLI re-launches itself as a detached process (new session on POSIX, `DETACHED_PROCESS` on Windows) and returns at once | SessionEnd hooks can be killed before a network push completes. Detaching makes truncation irrelevant: the hook returns instantly, the push outlives it. If it still dies, the next pull's drain step finishes the job. |
+| Scheduled (30 min) | `engram sync push`: Windows task `EngramSync` running `pythonw` (no console flash), crontab line tagged `# engram-sync` elsewhere | The real durability guarantee. Treat SessionEnd as best-effort. |
 
 ## 9. Known Claude Code behaviours designed around
 
-- `@import` in `~/.claude/CLAUDE.md` must use **forward slashes** on Windows (`@<home>/engram/index.md`, e.g. `@C:/Users/yourname/engram/index.md`) — backslash paths hit a path-parsing bug.
+- `@import` in `~/.claude/CLAUDE.md` must use **forward slashes** on Windows (`@C:/Users/yourname/engram/index.md`) — backslash paths hit a path-parsing bug. Hook commands use forward slashes too.
 - Imports resolve at session start. A `pull` in SessionStart may land *after* the index is read, so the always-loaded index can be one session stale. Acceptable: the 30-min sync means the tree is nearly always fresh already, and `projects/*.md` are lazy-read *during* the session — after the pull — so the actual content is current.
-- `settings.json` must be written **UTF-8 without BOM**. PowerShell 5.1's `Set-Content -Encoding UTF8` emits a BOM.
+- `settings.json` must be written **UTF-8 without BOM**; connect reads it BOM-tolerant and writes it without one.
