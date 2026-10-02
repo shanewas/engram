@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "engram-sync"
+dynamic = ["version"]
+description = "Cross-machine memory for AI coding agents (Claude Code, Codex, OpenCode, Antigravity, Muse), synced through your own private git repo."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Shanewas Ahmed", email = "shanewasahmed@gmail.com" }]
+requires-python = ">=3.9"
+dependencies = []
+keywords = ["claude-code", "codex", "opencode", "agent-memory", "git-sync", "skills"]
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development",
+]
+
+[project.urls]
+Homepage = "https://github.com/shanewas/engram"
+Issues = "https://github.com/shanewas/engram/issues"
+
+[project.scripts]
+engram = "engram_sync.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "engram_sync.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+engram_sync = [
+    "skills/*/SKILL.md",
+    "seed/*.md",
+    "seed/.gitattributes",
+    "seed/.gitignore",
+    "seed/.engram/sync-paths.conf",
+    "seed/*/*.md",
+    "seed/inbox/.gitkeep",
+]

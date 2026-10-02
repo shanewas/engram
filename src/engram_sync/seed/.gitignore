@@ -1,0 +1,5 @@
+ALERT.md
+.obsidian/
+Thumbs.db
+.DS_Store
+*.tmp
