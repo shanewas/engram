@@ -59,6 +59,31 @@ class HarnessTests(unittest.TestCase):
         self.assertTrue((self.home / '.codex' / 'skills' / 'engram' / h.OWNED).exists())
         self.assertIn(h.BEGIN, (self.home / '.codex' / 'AGENTS.md').read_text(encoding='utf-8'))
 
+    def test_adopt_replaces_foreign_dir_and_marks_it(self):
+        skills = self.home / '.codex' / 'skills'
+        write(skills / 'mine' / 'SKILL.md', 'stale copy\n')
+        h.connect('codex', self.repo, out=self.quiet, adopt=True)
+        self.assertIn('name: mine', (skills / 'mine' / 'SKILL.md').read_text(encoding='utf-8'))
+        self.assertTrue((skills / 'mine' / h.OWNED).exists())
+
+    def test_dot_claude_skills_layout_is_a_source_and_wins_clashes(self):
+        write(self.repo / '.claude' / 'skills' / 'legacy' / 'SKILL.md', '---\nname: legacy\n---\n')
+        write(self.repo / '.claude' / 'skills' / 'mine' / 'SKILL.md', '---\nname: mine-v2\n---\n')
+        (self.repo / '.claude' / 'skills' / 'category').mkdir()
+        h.connect('codex', self.repo, out=self.quiet)
+        skills = self.home / '.codex' / 'skills'
+        self.assertTrue((skills / 'legacy' / 'SKILL.md').exists())
+        self.assertIn('mine-v2', (skills / 'mine' / 'SKILL.md').read_text(encoding='utf-8'))
+        self.assertFalse((skills / 'category').exists())
+
+    def test_skills_only_leaves_instructions_and_settings_alone(self):
+        claude = self.home / '.claude'
+        write(claude / 'CLAUDE.md', '# managed elsewhere\n')
+        h.connect('claude', self.repo, out=self.quiet, skills_only=True)
+        self.assertEqual((claude / 'CLAUDE.md').read_text(encoding='utf-8'), '# managed elsewhere\n')
+        self.assertFalse((claude / 'settings.json').exists())
+        self.assertTrue((claude / 'skills' / 'engram' / h.OWNED).exists())
+
     def test_opencode_agents_md_not_created_when_absent(self):
         h.connect('opencode', self.repo, out=self.quiet)
         self.assertFalse((self.home / '.config' / 'opencode' / 'AGENTS.md').exists())

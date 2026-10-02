@@ -94,7 +94,8 @@ def has_block(path):
 # --- skills -------------------------------------------------------------------
 
 def skill_sources(repo):
-    roots = [PKG_SKILLS, Path(repo) / 'skills']
+    # later roots win on a name clash; .claude/skills is the pre-package repo layout
+    roots = [PKG_SKILLS, Path(repo) / 'skills', Path(repo) / '.claude' / 'skills']
     out = {}
     for root in roots:
         if root.is_dir():
@@ -104,15 +105,18 @@ def skill_sources(repo):
     return out
 
 
-def copy_skills(repo, dest_root, out=print):
-    """Copy skills as real dirs. Never replaces a dir this tool did not create."""
+def copy_skills(repo, dest_root, out=print, adopt=False):
+    """Copy skills as real dirs. Replaces a dir this tool did not create only when adopt is set."""
     dest_root.mkdir(parents=True, exist_ok=True)
     for name, src in skill_sources(repo).items():
         dest = dest_root / name
-        if dest.is_symlink() or (dest.exists() and not (dest / OWNED).exists()):
-            out('[engram] skip skill %s: %s exists and is not managed by engram-sync' % (name, dest))
+        foreign = dest.is_symlink() or (dest.exists() and not (dest / OWNED).exists())
+        if foreign and not adopt:
+            out('[engram] skip skill %s: %s exists and is not managed by engram-sync (use --adopt)' % (name, dest))
             continue
-        if dest.exists():
+        if dest.is_symlink():
+            dest.unlink()
+        elif dest.exists():
             shutil.rmtree(dest)
         shutil.copytree(src, dest, ignore=shutil.ignore_patterns('__pycache__'))
         (dest / OWNED).write_text('managed by engram-sync; edits here are overwritten\n', encoding='utf-8')
@@ -174,9 +178,12 @@ def has_claude_hooks(spec):
 
 # --- connect / disconnect ---------------------------------------------------------
 
-def connect(hid, repo, out=print):
+def connect(hid, repo, out=print, adopt=False, skills_only=False):
     spec = registry()[hid]
-    copy_skills(repo, spec['skills'], out)
+    copy_skills(repo, spec['skills'], out, adopt)
+    if skills_only:
+        out('[engram] connected %s (skills only)' % spec['name'])
+        return
     mem = spec.get('memory')
     if mem and (mem.exists() or not spec.get('memory_if_exists')):
         upsert_block(mem, block(repo, spec.get('import', False)))
@@ -198,7 +205,8 @@ def is_connected(hid):
     spec = registry()[hid]
     skills_ok = (spec['skills'] / 'engram' / OWNED).exists()
     if hid == 'claude':
-        return skills_ok and has_block(spec['memory']) and has_claude_hooks(spec)
+        # the instructions block is optional: a dotfiles-managed CLAUDE.md may import index.md itself
+        return skills_ok and has_claude_hooks(spec)
     return skills_ok
 
 

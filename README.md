@@ -25,9 +25,9 @@ Run `engram doctor` to check everything is wired up.
 | Antigravity | `~/.gemini/config/skills` | `~/.gemini/rules/engram.md` | background sync |
 | Muse | `~/.config/muse/skills` | reads `~/.claude/CLAUDE.md` | background sync |
 
-Three skills ship with the package: `engram` (operate sync), `engram-remember` (save a fact to the right file) and `engram-consolidate` (weekly cleanup, conflict repair). Put your own skills in `skills/<name>/SKILL.md` inside the memory repo and every connected agent on every machine gets them on the next pull.
+Three skills ship with the package: `engram` (operate sync), `engram-remember` (save a fact to the right file) and `engram-consolidate` (weekly cleanup, conflict repair). Put your own skills in `skills/<name>/SKILL.md` (or `.claude/skills/<name>/SKILL.md`) inside the memory repo and every connected agent on every machine gets them on the next pull.
 
-Instructions go between `<!-- engram-sync:begin -->` and `<!-- engram-sync:end -->` markers. Your own text around the markers is never touched. A skill folder you created yourself is never overwritten, even if it has the same name as one of engram's. `engram disconnect` removes exactly what `connect` added.
+Instructions go between `<!-- engram-sync:begin -->` and `<!-- engram-sync:end -->` markers. Your own text around the markers is never touched. A skill folder you created yourself is never overwritten, even if it has the same name as one of engram's, unless you run `engram connect --adopt`. `engram disconnect` removes exactly what `connect` added.
 
 ## Commands
 
@@ -35,7 +35,7 @@ Instructions go between `<!-- engram-sync:begin -->` and `<!-- engram-sync:end -
 |---|---|
 | `engram init <repo>` | clone or seed the memory repo, connect agents, schedule sync |
 | `engram sync pull` / `push` | sync now; always exits 0 so it can never break an agent session |
-| `engram connect [agent …]` | connect all detected agents, or the named ones (`claude codex opencode antigravity muse`) |
+| `engram connect [agent …]` | connect all detected agents, or the named ones (`claude codex opencode antigravity muse`). `--adopt` takes over existing skill folders of the same name; `--skills-only` leaves instruction files and hooks to another tool such as a dotfiles manager |
 | `engram disconnect [agent …]` | undo `connect` |
 | `engram schedule on` / `off` | the 30-minute background push |
 | `engram doctor` | health check: repo, remote, last sync, schedule, agents |

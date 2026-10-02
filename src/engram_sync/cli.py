@@ -110,7 +110,8 @@ def cmd_connect(a):
         say('[engram] no agent harness detected; name one: %s' % ', '.join(harnesses.registry()))
         return 1
     for h in hids:
-        harnesses.connect(h, a.repo, out=say)
+        harnesses.connect(h, a.repo, out=say, adopt=getattr(a, 'adopt', False),
+                          skills_only=getattr(a, 'skills_only', False))
     return 0
 
 
@@ -234,6 +235,11 @@ def main(argv=None):
     for name, fn in (('connect', cmd_connect), ('disconnect', cmd_disconnect)):
         s = sub.add_parser(name, help='%s agent harnesses (default: all detected)' % name)
         s.add_argument('harness', nargs='*')
+        if name == 'connect':
+            s.add_argument('--adopt', action='store_true',
+                           help='replace existing skill dirs of the same name that engram-sync did not create')
+            s.add_argument('--skills-only', action='store_true',
+                           help='copy skills only; leave instruction files and hooks alone (e.g. when dotfiles manage them)')
         s.set_defaults(fn=fn)
 
     s = sub.add_parser('schedule', help='turn the 30-min background sync on or off')
