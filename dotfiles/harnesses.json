@@ -1,7 +1,10 @@
 {
   "claude": {
     "name": "Claude Code",
-    "binaries": ["claude", "claude.exe"],
+    "binaries": [
+      "claude",
+      "claude.exe"
+    ],
     "config_dir": "{{HOME}}/.claude",
     "memory_file": "{{HOME}}/.claude/CLAUDE.md",
     "memory_import": "@{{ENGRAM_HOME_FWD}}/index.md",
@@ -12,7 +15,10 @@
   },
   "antigravity": {
     "name": "Antigravity (agy)",
-    "binaries": ["agy", "agy.exe"],
+    "binaries": [
+      "agy",
+      "agy.exe"
+    ],
     "config_dir": "{{HOME}}/.gemini",
     "memory_file": "{{HOME}}/.gemini/rules/engram.md",
     "skills_dir": "{{HOME}}/.gemini/config/skills",
@@ -22,7 +28,11 @@
   },
   "opencode": {
     "name": "OpenCode",
-    "binaries": ["opencode", "opencode.ps1", "opencode.cmd"],
+    "binaries": [
+      "opencode",
+      "opencode.ps1",
+      "opencode.cmd"
+    ],
     "config_dir": "{{HOME}}/.config/opencode",
     "memory_file": "{{HOME}}/.config/opencode/instructions.md",
     "skills_dir": "{{HOME}}/.config/opencode/skills",
@@ -33,17 +43,11 @@
   "muse": {
     "name": "Muse",
     "binaries": ["muse", "muse.cmd"],
-    "config_dir": "{{HOME}}/.muse",
-    "memory_file": "{{HOME}}/.muse/instructions.md",
-    "skills_dir": "{{HOME}}/.muse/skills",
-    "mcp_file": "{{HOME}}/.muse/config.json",
+    "config_dir": "{{HOME}}/.config/muse",
+    "memory_file": "{{HOME}}/.claude/CLAUDE.md",
+    "skills_dir": "{{HOME}}/.config/muse/skills",
+    "mcp_file": null,
     "mcp_key": "mcpServers",
     "mcp_format": "claude"
-  },
-  "hermes": {
-    "name": "Hermes Bridge",
-    "config_dir": "{{ENGRAM_HOME}}/vault",
-    "vault_path": "{{HOME}}/Documents/Obsidian Vault",
-    "type": "bridge"
   }
 }

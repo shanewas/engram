@@ -25,6 +25,11 @@ HARNESSES_DEF = REPO_ROOT / 'dotfiles' / 'harnesses.json'
 MCP_TMPL = REPO_ROOT / 'dotfiles' / 'mcp.json.tmpl'
 
 
+def _wtext(p, s):
+    with open(p, 'w', encoding='utf-8', newline='') as f:
+        f.write(s)
+
+
 def load_secrets():
     """Load KEY=VALUE secrets from secrets.env without evaluating as shell."""
     if not SECRETS_FILE.exists():
@@ -131,6 +136,64 @@ def collect_available_skills(repo=None):
     return skills
 
 
+# Muse (1.0.x) reads materialized dirs only: symlinked SKILL.md files are
+# silently skipped and `muse skills install` rejects them, so deploy always
+# copies content (copytree follows symlinks). Direct copies into the managed
+# root load without lockfile tracking (verified 2026-09-09).
+MUSE_FAT_EXCLUDES = {'__pycache__', '.git', '.DS_Store', 'Thumbs.db',
+                      'node_modules', '.venv', '.gstack', 'dist', 'test', 'tests'}
+MUSE_DOCS_ONLY = {'gstack'}  # repo stays runnable at ~/.claude/skills/gstack
+# Plugin trees needing an MCP runtime Muse 1.0.x lacks. Matched against the
+# source path, so harness/repo skills with similar names are unaffected.
+MUSE_PLUGIN_PATH_EXCLUDES = ('chrome-devtools', 'chrome_devtools',
+                              'mcp-server-dev', '/remember/',
+                              'claude-code-setup')
+
+
+def skill_frontmatter_name(skill_dir):
+    """Read the frontmatter name: from SKILL.md, or None when absent."""
+    try:
+        with open(skill_dir / 'SKILL.md', encoding='utf-8', errors='replace') as f:
+            head = f.read(2048)
+    except OSError:
+        return None
+    m = re.search(r'^name:\s*(.+)$', head, re.MULTILINE)
+    return m.group(1).strip().strip('"\'') if m else None
+
+
+def installed_plugin_paths():
+    """Install paths of user-installed Claude plugins (cache layout)."""
+    paths = []
+    try:
+        with open(HOME / '.claude' / 'plugins' / 'installed_plugins.json',
+                  encoding='utf-8') as f:
+            plugins = json.load(f).get('plugins', {})
+    except (OSError, ValueError):
+        return paths
+    for entries in plugins.values():
+        if isinstance(entries, dict):
+            entries = [entries]
+        for e in entries or []:
+            p = Path(e.get('installPath', '')) if isinstance(e, dict) else None
+            if p and p.is_dir() and p not in paths:
+                paths.append(p)
+    return sorted(paths)
+
+
+def polymath_knowledge_roots():
+    """Locate cc-polymath knowledge roots (installed + classic layouts)."""
+    roots = []
+    cands = [p for p in installed_plugin_paths() if 'polymath' in p.name.lower()]
+    legacy = HOME / '.claude' / 'plugins' / 'marketplaces' / 'cc-polymath'
+    if legacy.is_dir():
+        cands.append(legacy)
+    for base in cands:
+        for sk in sorted(base.rglob('skills')):
+            if sk.is_dir() and '.openclaw' not in sk.parts:
+                roots.append(sk)
+    return roots
+
+
 class HarnessManager:
     """Manages AI agent harness discovery, connection, and synchronization."""
 
@@ -232,7 +295,7 @@ class HarnessManager:
                 existing = mem_file.read_text(encoding='utf-8', errors='replace') if mem_file.exists() else ''
                 if fwd not in existing and 'engram/index.md' not in existing:
                     new_content = existing.rstrip() + '\n\n' + import_line.strip() + '\n'
-                    mem_file.write_text(new_content, encoding='utf-8', newline='')
+                    _wtext(mem_file, new_content)
                     notes.append(f'Wired memory index into {mem_file}')
                 else:
                     notes.append(f'Memory already wired in {mem_file}')
@@ -246,6 +309,18 @@ class HarnessManager:
             copied_count = self._copy_skills(dest_dir, dry_run=dry_run)
             prefix = '[dry-run] Would deploy' if dry_run else 'Deployed'
             notes.append(f'{prefix} {copied_count} skills to {dest_dir}')
+            if hid == 'muse':
+                extra_names, know, skipped = self._copy_muse_extras(dest_dir, dry_run=dry_run)
+                sample = ', '.join(extra_names[:12])
+                if len(extra_names) > 12:
+                    sample += f', ... (+{len(extra_names) - 12} more)'
+                notes.append(f'{prefix} {len(extra_names)} extra skills from '
+                             f'Claude/Antigravity/plugins to {dest_dir} ({sample})')
+                if know:
+                    notes.append(f'{prefix} {know} polymath knowledge dirs to {dest_dir}')
+                if skipped:
+                    notes.append(f'skipped {len(skipped)} alias dirs '
+                                 f'(frontmatter name differs): {", ".join(sorted(skipped))}')
 
         # 3. Inject MCP Configuration
         mcp_file_str = conf.get('mcp_file')
@@ -273,7 +348,7 @@ class HarnessManager:
                 fwd = str(self.repo).replace('\\', '/')
                 lines = [l for l in content.splitlines() if fwd not in l and 'engram/index.md' not in l and '# Engram Shared Memory' not in l]
                 if not dry_run:
-                    mem_file.write_text('\n'.join(lines).strip() + '\n', encoding='utf-8', newline='')
+                    _wtext(mem_file, '\n'.join(lines).strip() + '\n')
                 notes.append(f'Unwired memory from {mem_file}')
         return notes
 
@@ -299,6 +374,82 @@ class HarnessManager:
                 shutil.copytree(src_dir, target, ignore=shutil.ignore_patterns(*skip_names))
             count += 1
         return count
+
+    def _deploy_muse_skill(self, dest_dir, name, src_dir):
+        """Copy one skill into the Muse managed root, materializing symlinks."""
+        target = dest_dir / name
+        if os.path.islink(str(target)) or target.is_symlink():
+            try:
+                target.unlink()
+            except OSError:
+                os.rmdir(str(target))
+        elif target.exists():
+            shutil.rmtree(target)
+        if name in MUSE_DOCS_ONLY:
+            target.mkdir(parents=True, exist_ok=True)
+            for p in sorted(src_dir.iterdir()):
+                if p.is_file() and (p.suffix == '.md' or p.name.startswith('LICENSE') or p.name == 'SKILL.md'):
+                    shutil.copy2(p, target / p.name)
+            return
+        shutil.copytree(src_dir, target, symlinks=False,
+                        ignore=shutil.ignore_patterns(*MUSE_FAT_EXCLUDES))
+
+    def _copy_muse_extras(self, dest_dir, dry_run=False):
+        """Deploy sibling-harness + plugin skills Muse can't read in place.
+
+        Precedence: repo canonical (already deployed) wins; then Claude skills,
+        Antigravity skills, then Claude plugin skill trees, first name wins.
+        copytree follows symlinks, so linked skills materialize. Polymath
+        knowledge dirs (no SKILL.md) ride along for ../<topic>/INDEX.md refs.
+        """
+        have = set(collect_available_skills(self.repo))
+        cands = []
+        for hid in ('claude', 'antigravity'):
+            sdir = self.spec.get(hid, {}).get('skills_dir')
+            if not sdir:
+                continue
+            root = Path(expand_path(sdir, self.repo))
+            if root.is_dir():
+                for item in sorted(root.iterdir()):
+                    if item.is_dir() and (item / 'SKILL.md').exists():
+                        cands.append((item.name, item))
+        for base in installed_plugin_paths():
+            trees = sorted(base.rglob('skills'), key=lambda p: (len(p.parts), str(p)))
+            for sdir in trees:
+                if not sdir.is_dir() or '.openclaw' in sdir.parts:
+                    continue
+                spath = str(sdir).replace('\\', '/')
+                if any(x in spath for x in MUSE_PLUGIN_PATH_EXCLUDES):
+                    continue
+                for item in sorted(sdir.iterdir()):
+                    if item.is_dir() and (item / 'SKILL.md').exists():
+                        cands.append((item.name, item))
+        if not dry_run:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+        names, skipped_alias = [], []
+        for name, src in cands:
+            if name in have:
+                continue
+            fm = skill_frontmatter_name(src)
+            if fm is not None and fm != name:
+                skipped_alias.append(name)  # legacy alias dir, canonical name wins
+                continue
+            have.add(name)
+            if not dry_run:
+                self._deploy_muse_skill(dest_dir, name, src)
+            names.append(name)
+        know = 0
+        for proot in polymath_knowledge_roots():
+            for item in sorted(proot.iterdir()):
+                if not item.is_dir() or (item / 'SKILL.md').exists():
+                    continue
+                if (dest_dir / item.name).exists():
+                    continue
+                if not dry_run:
+                    shutil.copytree(item, dest_dir / item.name, symlinks=False,
+                                    ignore=shutil.ignore_patterns(*MUSE_FAT_EXCLUDES))
+                know += 1
+        return names, know, skipped_alias
 
     def _inject_mcp(self, dest_file, key_name, fmt, dry_run=False):
         """Compile and safely inject MCP configuration into target JSON file."""
@@ -355,6 +506,6 @@ class HarnessManager:
             existing[key_name][sname] = sdata
 
         # Write UTF-8 with NO BOM
-        dest_file.write_text(json.dumps(existing, indent=2, ensure_ascii=False) + '\n', encoding='utf-8', newline='')
+        _wtext(dest_file, json.dumps(existing, indent=2, ensure_ascii=False) + '\n')
         notes.append(f'Injected {len(compiled)} MCP server(s) into {dest_file} ({key_name})')
         return notes

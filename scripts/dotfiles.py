@@ -135,10 +135,29 @@ def excluded(rel, excl):
 
 def home_forms():
     h = str(HOME)
-    forms = [(h, '{{HOME}}')]
-    if '\\' in h:
-        forms = [(h.replace('\\', '\\\\'), '{{HOME_JSON}}'), (h.replace('\\', '/'), '{{HOME_FWD}}')] + forms
-    return forms
+    return [(h.replace('\\', '\\\\'), '{{HOME_JSON}}'), (h.replace('\\', '/'), '{{HOME_FWD}}'), (h, '{{HOME}}')]
+
+
+def engram_forms():
+    r = str(REPO).replace('\\', '/')
+    return [(r, '{{ENGRAM_HOME_FWD}}'), (str(REPO), '{{ENGRAM_HOME}}')]
+
+
+INCLUDE_RE = re.compile(r'\{\{INCLUDE:([^}]+)\}\}')
+
+
+def render_includes(text, host, secrets, _depth=0):
+    if _depth > 5:
+        raise MissingKey('INCLUDE:depth')
+    def sub(m):
+        rel = m.group(1).strip().replace('\\', '/')
+        if rel.startswith('/') or '..' in rel.split('/'):
+            raise MissingKey('INCLUDE:' + rel)
+        p = DOT / rel
+        if not p.is_file():
+            raise MissingKey('INCLUDE:' + rel)
+        return render_includes(rt(p), host, secrets, _depth + 1)
+    return INCLUDE_RE.sub(sub, text)
 
 
 def is_json(src):
@@ -151,7 +170,10 @@ def esc(value, json_target):
 
 
 def render(text, host, secrets, json_target=False):
+    text = render_includes(text, host, secrets)
     for literal, tag in home_forms():
+        text = text.replace(tag, literal)
+    for literal, tag in engram_forms():
         text = text.replace(tag, literal)
 
     def var(m):
@@ -177,8 +199,31 @@ def unrender(text, host, secrets, json_target=False):
     for k, v in sorted(host['vars'].items(), key=lambda kv: -len(kv[1])):
         if len(v) >= 4:
             text = text.replace(esc(v, json_target), '{{VAR:%s}}' % k)
-    for literal, tag in home_forms():
+    for literal, tag in engram_forms():
         text = text.replace(literal, tag)
+    seen = set()
+    for literal, tag in home_forms():
+        if literal not in seen:
+            seen.add(literal)
+            text = text.replace(literal, tag)
+    return text
+
+
+def fold_includes(text, src, host, secrets, json_target=False):
+    try:
+        tags = set(INCLUDE_RE.findall(rt(DOT / src)))
+    except OSError:
+        return text
+    for rel in sorted(tags, key=len, reverse=True):
+        try:
+            p = DOT / rel.strip().replace('\\', '/')
+            if not p.is_file():
+                continue
+            expansion = render(rt(p), host, secrets, json_target)
+            if expansion and expansion in text:
+                text = text.replace(expansion, '{{INCLUDE:%s}}' % rel, 1)
+        except MissingKey:
+            pass
     return text
 
 
@@ -232,6 +277,7 @@ def capture_file(src, dest, host, secrets):
     ov = host['overlay'].get(src)
     if ov:
         text = dump_json(unmerge(json.loads(text), ov))
+    text = fold_includes(text, src, host, secrets, is_json(src))
     wt(DOT / src, unrender(text, host, secrets, is_json(src)))
 
 
@@ -452,7 +498,7 @@ def save(stage=True):
             state['files'][str(p)] = sha(p.read_bytes())
             managed.append(str(rel))
         state['managed'][str(dest)] = managed
-    repo_skills = REPO / 'plugins' / 'engram' / 'skills'
+    repo_skills = REPO / '.claude' / 'skills'
     if repo_skills.exists():
         for d in repo_skills.iterdir():
             live = HOME / '.claude' / 'skills' / d.name
@@ -491,8 +537,12 @@ def doctor():
         refs |= set(re.findall(r'\{\{SECRET:(\w+)\}\}', rt(mcp)))
     missing = sorted(refs - set(load_secrets()))
     checks.append(('all referenced secrets present' + ('' if not missing else ' (missing: %s)' % ', '.join(missing)), not missing))
-    pending = plan_installs(load_host(), load_secrets(), shutil.which('claude'))
-    checks.append(('plugins/mcp installed' + ('' if not pending else ' (%d pending)' % len(pending)), not pending))
+    try:
+        pending = plan_installs(load_host(), load_secrets(), shutil.which('claude'))
+    except MissingKey as e:
+        checks.append(('plugins/mcp install planned (blocked: %s)' % e, False))
+    else:
+        checks.append(('plugins/mcp installed' + ('' if not pending else ' (%d pending)' % len(pending)), not pending))
     for l in lines(DOT / 'externals.txt'):
         name, url, version, keep = l.split('|')
         vf = HOME / '.claude' / 'skills' / name / 'VERSION'

@@ -7,6 +7,11 @@ set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || { echo "[FAIL] cannot resolve engram root"; exit 1; }
 cd "$DIR" 2>/dev/null || { echo "[FAIL] cannot cd to $DIR"; exit 1; }
 
+# ISO-8601 UTC -> epoch seconds. GNU date (-d) first, BSD/macOS date (-j -f) second.
+iso_to_epoch() {
+  date -u -d "$1" +%s 2>/dev/null || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null
+}
+
 # --- --status: the non-technical view. Plain sentences, no check IDs. ----------
 human_age() {
   local s="$1"
@@ -27,7 +32,7 @@ if [ "${1:-}" = "--status" ]; then
     echo "   Nothing is lost. Open Claude Code and say \"consolidate memory\"."
   elif [ -f ".git/engram-state" ]; then
     read -r kind ts _reason < .git/engram-state 2>/dev/null || kind=""
-    ts_epoch="$(date -u -d "${ts:-}" +%s 2>/dev/null)" || ts_epoch=0
+    ts_epoch="$(iso_to_epoch "${ts:-}")" || ts_epoch=0
     age=$(( now_epoch - ts_epoch ))
     if [ "$kind" = "ok" ] && [ "$ts_epoch" -gt 0 ] && [ "$age" -le 5400 ]; then
       echo "✅ Healthy. This machine last synced $(human_age "$age") ago."
@@ -62,7 +67,9 @@ info() { printf '[INFO] %s\n' "$1"; }
 
 export GIT_TERMINAL_PROMPT=0
 export GCM_INTERACTIVE=never
-export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10"
+# GIT_SSH_COMMAND overrides core.sshCommand, so carry a configured one (a deploy
+# key) into the guard instead of replacing it.
+export GIT_SSH_COMMAND="$(git config --get core.sshCommand 2>/dev/null || echo ssh) -o BatchMode=yes -o ConnectTimeout=10"
 
 echo "engram doctor — $DIR"
 echo
@@ -110,9 +117,12 @@ else
   fail "CLAUDE.md: import target $DIR/index.md is MISSING"
 fi
 
-# 3. settings.json hooks --------------------------------------------------------
+# 3. sync hooks: either merged into settings.json (setup-vps.sh) or shipped by the
+#    installed engram plugin (plugins/engram/hooks/hooks.json) -------------------
 SET="${HOME:-}/.claude/settings.json"
-if [ -f "$SET" ] && command -v jq >/dev/null 2>&1 && jq empty "$SET" >/dev/null 2>&1; then
+if grep -rqs 'scripts/sync.sh' "${HOME:-}/.claude/plugins" --include=hooks.json 2>/dev/null; then
+  pass "hooks: engram plugin provides SessionStart/SessionEnd sync hooks"
+elif [ -f "$SET" ] && command -v jq >/dev/null 2>&1 && jq empty "$SET" >/dev/null 2>&1; then
   pass "settings.json: valid JSON ($SET)"
   if jq -e '(.hooks.SessionStart // []) | any(.hooks[]?.command // "" | contains("engram") and contains("sync.sh"))' "$SET" >/dev/null 2>&1; then
     pass "settings.json: SessionStart engram hook present"
@@ -129,8 +139,10 @@ else
 fi
 
 # 4. skills are real dirs (not symlinks), each with SKILL.md --------------------
-if [ -d "$DIR/plugins/engram/skills" ]; then
-  for d in "$DIR/plugins/engram/skills"/*/; do
+SKILLS_SRC="$DIR/.claude/skills"
+[ -d "$SKILLS_SRC" ] || SKILLS_SRC="$DIR/plugins/engram/skills"
+if [ -d "$SKILLS_SRC" ]; then
+  for d in "$SKILLS_SRC"/*/; do
     [ -d "$d" ] || continue
     name="$(basename "$d")"
     target="${HOME:-}/.claude/skills/$name"
@@ -143,7 +155,7 @@ if [ -d "$DIR/plugins/engram/skills" ]; then
     fi
   done
 else
-  warn "no plugins/engram/skills directory in repo — nothing to check"
+  warn "no skills directory in repo (.claude/skills or plugins/engram/skills) — nothing to check"
 fi
 
 # 5. cron ------------------------------------------------------------------------
@@ -169,7 +181,7 @@ if [ -f "$STATE_FILE" ]; then
   kind=""; ts=""; reason=""
   read -r kind ts reason < "$STATE_FILE" 2>/dev/null
   now_epoch="$(date -u +%s)"
-  ts_epoch="$(date -u -d "${ts:-}" +%s 2>/dev/null)" || ts_epoch=0
+  ts_epoch="$(iso_to_epoch "${ts:-}")" || ts_epoch=0
   age=$(( now_epoch - ts_epoch ))
   if [ "$kind" = "ok" ]; then
     if [ "$ts_epoch" -gt 0 ] && [ "$age" -le 5400 ]; then
@@ -208,9 +220,14 @@ if [ -f "$DIR/index.md" ]; then
   fi
 fi
 
+# 10. dotfiles: live configs match their templates (doctor.ps1 runs the same) -----
 echo "--- dotfiles ---"
-PY="$(command -v python3 || command -v python || true)"
-if [ -n "$PY" ]; then "$PY" "$(dirname "$0")/dotfiles.py" doctor || FAILURES=$((FAILURES+1)); else echo "SKIP python not found"; fi
+py="$(command -v python3 || command -v python)"
+if [ -n "$py" ]; then
+  "$py" -X utf8 "$DIR/scripts/dotfiles.py" doctor || FAILURES=$((FAILURES+1))
+else
+  warn "dotfiles: no python on PATH, check skipped"
+fi
 
 echo
 if [ "$FAILURES" -gt 0 ]; then

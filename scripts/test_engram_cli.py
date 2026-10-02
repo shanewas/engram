@@ -184,6 +184,83 @@ class TestEngramCli(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertNotIn('custom_folder', self.cli.get_allowlist())
 
+    def test_cli_include_exclude_keep_conf_comments(self):
+        conf = self.repo / 'scripts' / 'sync-paths.conf'
+        conf.write_text("# header comment\nindex.md\nprojects  # trailing\n\n# vault note\nvault\n", encoding='utf-8')
+
+        self.cli.cmd_include(self.cli.build_parser().parse_args(['include', 'notes']))
+        text = conf.read_text(encoding='utf-8')
+        self.assertIn('# header comment', text)
+        self.assertIn('# vault note', text)
+        self.assertIn('projects  # trailing', text)
+        self.assertEqual(self.cli.get_allowlist(), ['index.md', 'projects', 'vault', 'notes'])
+
+        self.cli.cmd_exclude(self.cli.build_parser().parse_args(['exclude', 'projects']))
+        text = conf.read_text(encoding='utf-8')
+        self.assertIn('# header comment', text)
+        self.assertNotIn('trailing', text)
+        self.assertEqual(self.cli.get_allowlist(), ['index.md', 'vault', 'notes'])
+
+    def test_cli_include_into_conf_naming_no_path_keeps_defaults(self):
+        # sync falls back to the defaults for a conf with no entries; include must add to that list
+        conf = self.repo / 'scripts' / 'sync-paths.conf'
+        conf.write_text("# only comments\n", encoding='utf-8')
+        self.assertEqual(self.cli.get_allowlist(), self.cli.DEFAULT_SYNCED)
+        self.cli.cmd_include(self.cli.build_parser().parse_args(['include', 'notes']))
+        self.assertEqual(self.cli.get_allowlist(), self.cli.DEFAULT_SYNCED + ['notes'])
+        self.assertIn('# only comments', conf.read_text(encoding='utf-8'))
+
+    def test_cli_default_allowlist_matches_sync_scripts(self):
+        sh = (SCRIPTS_DIR / 'sync.sh').read_text(encoding='utf-8')
+        ps1 = (SCRIPTS_DIR / 'sync.ps1').read_text(encoding='utf-8')
+        self.assertIn('ALLOWLIST_DEFAULT="%s"' % ' '.join(self.cli.DEFAULT_SYNCED), sh)
+        self.assertIn('@(%s)' % ', '.join("'%s'" % d for d in self.cli.DEFAULT_SYNCED), ps1)
+
+    def _record_platform_calls(self):
+        calls = []
+        self.cli.run_platform_script = lambda name, args=(): calls.append((name, list(args))) or 0
+        return calls
+
+    def test_cli_sync_runs_pull_then_push(self):
+        calls = self._record_platform_calls()
+        self.assertEqual(self.cli.main(['sync']), 0)
+        self.assertEqual(calls, [('sync', ['pull']), ('sync', ['push'])])
+
+    def test_cli_sync_single_leg_and_bare_verbs(self):
+        calls = self._record_platform_calls()
+        self.cli.main(['sync', 'push'])
+        self.cli.main(['pull'])
+        self.cli.main(['push'])
+        self.assertEqual(calls, [('sync', ['push']), ('sync', ['pull']), ('sync', ['push'])])
+
+    def test_cli_sync_rejects_unknown_leg(self):
+        import contextlib
+        import io
+        calls = self._record_platform_calls()
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.cli.main(['sync', 'pul'])
+        self.assertEqual(calls, [])
+
+    def test_cli_doctor_status_delegates_to_platform_script(self):
+        calls = self._record_platform_calls()
+        self.assertEqual(self.cli.main(['doctor', '--status']), 0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], 'doctor')
+        self.assertIn(calls[0][1][0].lower(), ('--status', '-status'))
+
+    def test_cli_restore_prints_runbook(self):
+        import contextlib
+        import io
+        self.assertTrue((SCRIPTS_DIR.parent / 'restore' / 'README.md').exists())
+        (self.repo / 'restore').mkdir()
+        (self.repo / 'restore' / 'README.md').write_text('# Disaster recovery\n\nclone it back.\n', encoding='utf-8')
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = self.cli.cmd_restore(self.cli.build_parser().parse_args(['restore']))
+        self.assertEqual(rc, 0)
+        self.assertIn('clone it back.', buf.getvalue())
+        self.assertNotIn('not found', buf.getvalue())
+
     def test_cli_memory(self):
         # Scaffold index.md and a mock project
         (self.repo / 'index.md').write_text('# Master Index\n- Line 2\n', encoding='utf-8')

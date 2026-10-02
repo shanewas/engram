@@ -1,5 +1,5 @@
 * text=auto
-index.md merge=union
+/index.md merge=union
 projects/** merge=union
 global/** merge=union
 inbox/** merge=union

@@ -145,7 +145,8 @@ $json = $settings | ConvertTo-Json -Depth 10
 Write-Host "[engram] settings written -> $settingsPath"
 
 # --- 3. skills: COPY as real directories, never symlink/junction ------------
-$skillsSrc = Join-Path $repo 'plugins\engram\skills'
+$skillsSrc = Join-Path $repo '.claude\skills'
+if (-not (Test-Path $skillsSrc)) { $skillsSrc = Join-Path $repo 'plugins\engram\skills' }
 $skillsDst = Join-Path $claudeDir 'skills'
 New-Item -ItemType Directory -Force -Path $skillsDst | Out-Null
 if (Test-Path $skillsSrc) {
@@ -168,7 +169,7 @@ if (Test-Path $skillsSrc) {
         Write-Host "[engram] skill copied: $name"
     }
 } else {
-    Write-Host "[engram] no plugins/engram/skills in repo -> nothing to copy"
+    Write-Host "[engram] no skills dir in repo (.claude/skills or plugins/engram/skills) -> nothing to copy"
 }
 
 # --- 4. scheduled task: on by default, mirrors VPS cron ----------------------
