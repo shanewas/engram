@@ -11,7 +11,7 @@ from . import __version__, harnesses
 from .sync import Sync, load_allowlist
 
 SEED = Path(__file__).parent / 'seed'
-TASK = 'EngramSync'
+TASK = 'engram-sync'  # distinct from the pre-package EngramSync task, which may carry extra actions
 CRON_TAG = '# engram-sync'
 
 

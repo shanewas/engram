@@ -123,7 +123,7 @@ The allowlist bounds *which files* sync; the scan catches a secret pasted *into*
 |---|---|---|
 | SessionStart | `engram sync pull`, synchronous, `timeout: 20` | Must finish before the session works; bounded so it can't wedge startup. |
 | SessionEnd | `engram sync push --detach`: the CLI re-launches itself as a detached process (new session on POSIX, `DETACHED_PROCESS` on Windows) and returns at once | SessionEnd hooks can be killed before a network push completes. Detaching makes truncation irrelevant: the hook returns instantly, the push outlives it. If it still dies, the next pull's drain step finishes the job. |
-| Scheduled (30 min) | `engram sync push`: Windows task `EngramSync` running `pythonw` (no console flash), crontab line tagged `# engram-sync` elsewhere | The real durability guarantee. Treat SessionEnd as best-effort. |
+| Scheduled (30 min) | `engram sync push`: Windows task `engram-sync` running `pythonw` (no console flash), crontab line tagged `# engram-sync` elsewhere | The real durability guarantee. Treat SessionEnd as best-effort. |
 
 ## 9. Known Claude Code behaviours designed around
 
