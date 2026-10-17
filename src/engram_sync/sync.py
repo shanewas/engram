@@ -14,6 +14,8 @@ CONF = Path('.engram') / 'sync-paths.conf'
 STALE_SECS = 300
 NUDGE_DAYS = 7
 MARKER = 'engram:not-a-secret'
+# Under pythonw (scheduled task) git would open its own console window and steal focus from fullscreen apps.
+NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 
 SECRET_PATTERNS = [
     (re.compile(r'AKIA[0-9A-Z]{16}'), 'AWS access key'),
@@ -83,7 +85,7 @@ class Sync:
             env['GIT_SSH_COMMAND'] = base + ' -o BatchMode=yes -o ConnectTimeout=10'
         r = subprocess.run(cmd + list(args), cwd=str(self.repo), env=env,
                            stdin=subprocess.DEVNULL, capture_output=True,
-                           encoding='utf-8', errors='replace')
+                           encoding='utf-8', errors='replace', creationflags=NO_WINDOW)
         return r.returncode, (r.stdout or '') + (r.stderr or '')
 
     # --- state / lock -------------------------------------------------------

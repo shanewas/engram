@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from . import __version__, harnesses
-from .sync import Sync, load_allowlist
+from .sync import NO_WINDOW, Sync, load_allowlist
 
 SEED = Path(__file__).parent / 'seed'
 TASK = 'engram-sync'  # distinct from the pre-package EngramSync task, which may carry extra actions
@@ -125,7 +125,7 @@ def cmd_disconnect(a):
 
 def git(repo, *args):
     r = subprocess.run(['git'] + list(args), cwd=str(repo), capture_output=True, encoding='utf-8',
-                       errors='replace', stdin=subprocess.DEVNULL,
+                       errors='replace', stdin=subprocess.DEVNULL, creationflags=NO_WINDOW,
                        env=dict(os.environ, GIT_TERMINAL_PROMPT='0'))
     return r.returncode, (r.stdout + r.stderr).strip()
 
