@@ -147,7 +147,7 @@ class InitTests(unittest.TestCase):
             self.assertIn(f, files)
         self.assertTrue(h.is_connected('claude'))
         self.assertEqual(self.init(self.tmp / 'pc2'), 0)
-        self.assertEqual(git(self.origin, 'rev-list', '--count', 'HEAD'), '1')
+        self.assertEqual(git(self.origin, 'log', '--format=%s', 'HEAD').count('engram: initialize'), 1)
 
     def test_init_refuses_mismatched_origin_and_non_git_dir(self):
         self.assertEqual(self.init(self.tmp / 'pc1'), 0)

@@ -11,9 +11,9 @@ engram init yourname/agent-memory
 
 1. connects every agent it finds on this machine (details below);
 2. schedules a background push every 30 minutes (Windows Task Scheduler, or cron on Linux/macOS);
-3. runs the first sync.
+3. runs the first sync, registers this machine, and prints `engram status`.
 
-Run `engram doctor` to check everything is wired up.
+Run `engram doctor` to check this machine is wired up, and `engram status` to see all of them.
 
 ## What lands in each agent
 
@@ -39,6 +39,8 @@ Instructions go between `<!-- engram-sync:begin -->` and `<!-- engram-sync:end -
 | `engram disconnect [agent …]` | undo `connect` |
 | `engram schedule on` / `off` | the 30-minute background push |
 | `engram doctor` | health check: repo, remote, last sync, schedule, agents |
+| `engram status` | every machine on this memory repo: OS, engram version, last sync, memory commits it has not pulled yet, connected agents, and problems (stale, outdated, parked conflict, no background sync) |
+| `engram upgrade` | `pip install --upgrade engram-sync` for the interpreter running engram |
 
 The memory repo defaults to `~/engram`. Use `--repo <path>` or `$ENGRAM_HOME` to put it elsewhere.
 
@@ -51,6 +53,7 @@ global/           preferences and machine facts
 inbox/YYYY-MM.md  quick captures, merged out by engram-consolidate
 archive/          dormant projects and the consolidate log
 skills/           optional: your own skills, shared to every agent
+nodes/<host>.json one heartbeat per machine, written by sync, read by `engram status`
 .engram/sync-paths.conf   what syncs automatically
 ```
 

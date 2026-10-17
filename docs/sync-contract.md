@@ -48,9 +48,10 @@ http.lowSpeedTime=15
 | `.git/engram-state` | `ok <iso8601>` or `err <iso8601> <reason>` — last sync outcome |
 | `ALERT.md` | repo root, **gitignored**, local-only. Its existence means this node needs human/model attention. |
 | `.engram/sync-paths.conf` | the commit allowlist — one path per line, `#` comments |
+| `nodes/<host>.json` | this node's heartbeat: `host`, `os`, `version`, `agents`, `scheduled`, `synced` (iso8601), `head` (HEAD before the heartbeat commit). Always staged alongside the allowlist. |
 | `archive/consolidate-log.md` | appended by the `consolidate` skill (`- YYYY-MM-DD <host>` per run); drives the maintenance nudge (§4 pull) |
 
-Commit allowlist — nothing else is ever staged. Read from `.engram/sync-paths.conf` (one path per line, relative to the repo root, `#` starts a comment); entries that are absolute or contain `..` are ignored. If the conf is missing or yields no entries, the built-in default applies (`index.md projects/ global/ inbox/ archive/`). `engram init` seeds exactly that default.
+Commit allowlist — nothing else is ever staged, apart from this node's own `nodes/<host>.json` heartbeat. Read from `.engram/sync-paths.conf` (one path per line, relative to the repo root, `#` starts a comment); entries that are absolute or contain `..` are ignored. If the conf is missing or yields no entries, the built-in default applies (`index.md projects/ global/ inbox/ archive/`). `engram init` seeds exactly that default.
 
 The conf itself lives under `.engram/`, outside the allowlist, so changing what syncs always requires a deliberate manual commit. The same goes for any other file outside the allowlist (`.gitattributes`, user `skills/`). `consolidate` surfaces untracked strays.
 
@@ -76,7 +77,7 @@ The conf itself lives under `.engram/`, outside the allowlist, so changing what 
 0. Read-only node (`.git/engram-readonly` exists) → run `pull` instead, exit 0.
 1. Acquire lock (held → exit 0).
 2. Self-heal rebase as above.
-3. `git add --` over the allowlist (skip paths that don't exist).
+3. **Heartbeat**: rewrite `nodes/<host>.json` when any field other than `synced`/`head` changed, or `synced` is ≥ 6 h old. A write failure prints one line and the push continues. Then `git add --` over the allowlist plus `nodes/` (skip paths that don't exist).
 4. **Secret scan** `git diff --cached` (§7). Hit → `git reset` (unstage), write `ALERT.md`, exit 0. Never commit a suspected secret.
 5. Commit if the staged diff is non-empty. Message: `sync(<host>): <iso8601>`.
 6. `git pull --rebase --autostash` (guarded). Conflict → `rebase --abort`; **escalate**; exit 0. Network/auth failure → state = err, print the same one-liner as pull step 3; exit 0.

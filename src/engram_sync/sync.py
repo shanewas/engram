@@ -3,15 +3,21 @@
 Every entry point returns normally: a sync failure must never block an agent session.
 """
 import datetime
+import json
 import os
+import platform
 import re
 import socket
 import subprocess
 from pathlib import Path
 
+from . import __version__
+
 DEFAULT_ALLOW = ['index.md', 'projects', 'global', 'inbox', 'archive']
 CONF = Path('.engram') / 'sync-paths.conf'
 STALE_SECS = 300
+NODES = 'nodes'  # per-node heartbeat files, always synced alongside the allowlist
+HEARTBEAT_SECS = 6 * 3600
 NUDGE_DAYS = 7
 MARKER = 'engram:not-a-secret'
 # Under pythonw (scheduled task) git would open its own console window and steal focus from fullscreen apps.
@@ -38,6 +44,15 @@ def iso_now():
     return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
+def age_secs(ts):
+    """Seconds since an iso_now() stamp; unparseable counts as infinitely old."""
+    try:
+        then = datetime.datetime.strptime(ts, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)
+    except (TypeError, ValueError):
+        return float('inf')
+    return (datetime.datetime.now(datetime.timezone.utc) - then).total_seconds()
+
+
 def host_name():
     raw = os.environ.get('ENGRAM_HOST') or socket.gethostname() or 'unknown-host'
     return re.sub(r'[^a-z0-9-]', '-', raw.lower())
@@ -62,11 +77,12 @@ def scan_secrets(diff_text):
 
 
 class Sync:
-    def __init__(self, repo, out=print, refresh_skills=None):
+    def __init__(self, repo, out=print, refresh_skills=None, node_info=None):
         self.repo = Path(repo)
         self.git_dir = self.repo / '.git'
         self.out = out
         self.refresh_skills = refresh_skills
+        self.node_info = node_info
         self.host = host_name()
         self.alert = self.repo / 'ALERT.md'
         self.lock = self.git_dir / 'engram-sync.lock'
@@ -102,10 +118,8 @@ class Sync:
             fd = os.open(str(self.lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
             try:
-                ts = self.lock.read_text(encoding='utf-8').split()[1]
-                age = (datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.strptime(
-                    ts, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)).total_seconds()
-            except (OSError, IndexError, ValueError):
+                age = age_secs(self.lock.read_text(encoding='utf-8').split()[1])
+            except (OSError, IndexError):
                 age = STALE_SECS + 1
             if age <= STALE_SECS:
                 return False
@@ -238,8 +252,30 @@ class Sync:
             self.set_state(False, 'pull failed: ' + self.pull_output.strip()[:200])
             self.report_offline(self.pull_output)
 
+    def heartbeat(self):
+        """Rewrite nodes/<host>.json when this node's facts change or the last one is HEARTBEAT_SECS old."""
+        path = self.repo / NODES / (self.host + '.json')
+        info = {'host': self.host, 'os': '%s %s' % (platform.system(), platform.release()), 'version': __version__}
+        if self.node_info:
+            info.update(self.node_info())
+        try:
+            old = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            old = {}
+        synced, _ = old.pop('synced', ''), old.pop('head', None)
+        if old == info and age_secs(synced) < HEARTBEAT_SECS:
+            return
+        info['synced'] = iso_now()
+        info['head'] = self.git('rev-parse', 'HEAD')[1].strip()
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps(info, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+
     def do_push(self):
-        for p in load_allowlist(self.repo):
+        try:
+            self.heartbeat()
+        except OSError as e:
+            self.out('[engram] node heartbeat skipped: %s' % e)
+        for p in load_allowlist(self.repo) + [NODES]:
             if (self.repo / p).exists():
                 self.git('add', '-A', '--', p)
         _, diff = self.git('diff', '--cached', '-U0', '--text')

@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import json
 import os
 import re
 import shutil
@@ -8,7 +9,7 @@ import sys
 from pathlib import Path
 
 from . import __version__, harnesses
-from .sync import NO_WINDOW, Sync, load_allowlist
+from .sync import NODES, NO_WINDOW, Sync, age_secs, host_name, load_allowlist
 
 SEED = Path(__file__).parent / 'seed'
 TASK = 'engram-sync'  # distinct from the pre-package EngramSync task, which may carry extra actions
@@ -41,8 +42,13 @@ def cmd_sync(a):
             kw['start_new_session'] = True
         subprocess.Popen(args, **kw)
         return 0
-    Sync(a.repo, out=say, refresh_skills=harnesses.refresh_connected).run(a.mode)
+    Sync(a.repo, out=say, refresh_skills=harnesses.refresh_connected, node_info=node_info).run(a.mode)
     return 0
+
+
+def node_info():
+    return {'agents': sorted(h for h in harnesses.registry() if harnesses.is_connected(h)),
+            'scheduled': schedule_present()}
 
 
 # --- schedule -----------------------------------------------------------------------
@@ -78,7 +84,7 @@ def schedule(repo, enable):
 def schedule_present():
     if os.name == 'nt':
         r = subprocess.run(['schtasks', '/Query', '/TN', TASK, '/V', '/FO', 'LIST'],
-                           capture_output=True, encoding='utf-8', errors='replace')
+                           capture_output=True, encoding='utf-8', errors='replace', creationflags=NO_WINDOW)
         return r.returncode == 0 and 'engram_sync' in r.stdout
     if not shutil.which('crontab'):
         return False
@@ -180,7 +186,72 @@ def cmd_init(a):
         ok, msg = schedule(repo, True)
         say('[engram] 30-min background sync %s' % ('scheduled' if ok else 'NOT scheduled: ' + msg))
     Sync(repo, out=say, refresh_skills=harnesses.refresh_connected).run('pull')
+    Sync(repo, out=say, node_info=node_info).run('push')  # registers this node in nodes/
+    print_status(repo)
     return 0
+
+
+# --- status / upgrade ---------------------------------------------------------------
+
+def vtuple(v):
+    return tuple(int(x) for x in re.findall(r'\d+', str(v))[:3])
+
+
+def ago(secs):
+    if secs == float('inf'):
+        return 'never'
+    for unit, n in (('d', 86400), ('h', 3600), ('m', 60)):
+        if secs >= n:
+            return '%d%s ago' % (secs // n, unit)
+    return 'just now'
+
+
+def print_status(repo):
+    nodes = []
+    for f in sorted((repo / NODES).glob('*.json')):
+        try:
+            nodes.append(json.loads(f.read_text(encoding='utf-8')))
+        except (OSError, ValueError) as e:
+            say('[engram] unreadable %s: %s' % (f.name, e))
+    if not nodes:
+        say('No node has reported yet. Each node reports on its next `engram sync push`.')
+        return
+    newest = max(vtuple(n.get('version')) for n in nodes)
+    rc, out = Sync(repo).git('ls-remote', '--heads', 'origin', 'conflict/*', remote=True)
+    parked = {l.rsplit('/', 1)[-1] for l in out.splitlines() if rc == 0 and '/conflict/' in l}
+    me = host_name()
+    say('%-22s %-20s %-8s %-10s %-8s %s' % ('NODE', 'OS', 'VERSION', 'LAST SYNC', 'BEHIND', 'NOTES'))
+    for n in nodes:
+        host, age = n.get('host', '?'), age_secs(n.get('synced'))
+        # heartbeat-only commits don't count: a node is behind only on memory it hasn't pulled
+        rc, behind = git(repo, 'rev-list', '--count', '%s..HEAD' % n.get('head', ''), '--', '.', ':!' + NODES)
+        notes = []
+        if host == me:
+            notes.append('this machine')
+        if age > 86400:
+            notes.append('STALE')
+        if vtuple(n.get('version')) < newest:
+            notes.append('UPDATE: engram upgrade')
+        if host in parked:
+            notes.append('CONFLICT: say "consolidate memory"')
+        if not n.get('scheduled'):
+            notes.append('no background sync')
+        say('%-22s %-20s %-8s %-10s %-8s %s' % (host[:22], str(n.get('os', '?'))[:20], n.get('version', '?'),
+                                               ago(age), behind if rc == 0 else '?', ', '.join(notes)))
+        if n.get('agents'):
+            say('%-22s agents: %s' % ('', ' '.join(n['agents'])))
+    if (repo / 'ALERT.md').exists():
+        say('\nThis machine has an open ALERT.md: run `engram sync pull` to see it.')
+
+
+def cmd_status(a):
+    Sync(a.repo, out=lambda m: None, refresh_skills=harnesses.refresh_connected).run('pull')
+    print_status(a.repo)
+    return 0
+
+
+def cmd_upgrade(a):
+    return subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'engram-sync']).returncode
 
 
 # --- doctor -------------------------------------------------------------------------
@@ -247,6 +318,8 @@ def main(argv=None):
     s.set_defaults(fn=cmd_schedule)
 
     sub.add_parser('doctor', help='check repo, sync, schedule and harness health').set_defaults(fn=cmd_doctor)
+    sub.add_parser('status', help='show every node: version, last sync, unseen commits, problems').set_defaults(fn=cmd_status)
+    sub.add_parser('upgrade', help='upgrade engram-sync from PyPI').set_defaults(fn=cmd_upgrade)
 
     a = p.parse_args(argv)
     a.repo = (a.repo or default_repo()).expanduser().resolve()

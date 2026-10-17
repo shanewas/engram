@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from engram_sync.sync import Sync, iso_now
@@ -29,7 +30,7 @@ class Base(unittest.TestCase):
         self.origin = self.tmp / 'origin.git'
         git(self.tmp, 'init', '-q', '--bare', '-b', 'main', str(self.origin))
         seed = self.tmp / 'seed'
-        git(self.tmp, 'clone', '-q', str(self.origin), str(seed))
+        git(self.tmp, 'clone', '-q', '-c', 'core.autocrlf=false', str(self.origin), str(seed))
         self.ident(seed)
         write(seed / 'index.md', '# index\n')
         write(seed / '.gitattributes', 'inbox/** merge=union\nprojects/** merge=union\n')
@@ -50,7 +51,7 @@ class Base(unittest.TestCase):
 
     def clone(self, name):
         path = self.tmp / name
-        git(self.tmp, 'clone', '-q', str(self.origin), str(path))
+        git(self.tmp, 'clone', '-q', '-c', 'core.autocrlf=false', str(self.origin), str(path))
         self.ident(path)
         return path
 
@@ -231,6 +232,33 @@ class TestContract(Base):
         git(self.a, 'remote', 'set-url', 'origin', str(self.tmp / 'missing.git'))
         Sync(self.a, out=lambda m: None, refresh_skills=calls.append).run('pull')
         self.assertEqual(len(calls), 1)
+
+    def test_push_writes_heartbeat_only_when_changed(self):
+        self.sync(self.a, 'push', host='alpha')
+        self.assertIn('nodes/alpha.json', self.origin_files())
+        commits = git(self.origin, 'rev-list', '--count', 'main')
+        self.sync(self.a, 'push', host='alpha')
+        self.assertEqual(git(self.origin, 'rev-list', '--count', 'main'), commits)
+        Sync(self.a, out=lambda m: None, node_info=lambda: {'agents': ['claude']}).run('push')
+        self.assertGreater(int(git(self.origin, 'rev-list', '--count', 'main')), int(commits))
+
+
+class TestStatus(Base):
+    def test_status_flags_stale_outdated_and_conflict(self):
+        from engram_sync import cli
+        self.sync(self.a, 'push', host='alpha')
+        write(self.a / 'nodes' / 'beta.json', '{"host": "beta", "os": "Linux 6", "version": "0.9.0", '
+                                             '"synced": "2020-01-01T00:00:00Z", "scheduled": true}\n')
+        git(self.a, 'push', '-q', 'origin', 'HEAD:conflict/beta')
+        out = []
+        with unittest.mock.patch.object(cli, 'say', out.append):
+            cli.print_status(self.a)
+        beta = next(l for l in out if l.startswith('beta'))
+        for flag in ('STALE', 'UPDATE', 'CONFLICT'):
+            self.assertIn(flag, beta)
+        alpha = next(l for l in out if l.startswith('alpha'))
+        self.assertIn(' 0 ', alpha)
+        self.assertNotIn('UPDATE', alpha)
 
 
 if __name__ == '__main__':
