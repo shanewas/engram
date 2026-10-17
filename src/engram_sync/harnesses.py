@@ -2,6 +2,7 @@
 import json
 import os
 import shutil
+import stat
 import sys
 from pathlib import Path
 
@@ -117,8 +118,8 @@ def copy_skills(repo, dest_root, out=print, adopt=False):
         if dest.is_symlink():
             dest.unlink()
         elif dest.exists():
-            shutil.rmtree(dest)
-        shutil.copytree(src, dest, ignore=shutil.ignore_patterns('__pycache__'))
+            rmtree(dest)
+        shutil.copytree(src, dest, ignore=shutil.ignore_patterns('__pycache__', '.git'))
         (dest / OWNED).write_text('managed by engram-sync; edits here are overwritten\n', encoding='utf-8')
 
 
@@ -127,7 +128,18 @@ def remove_skills(dest_root):
         return
     for d in dest_root.iterdir():
         if (d / OWNED).exists():
-            shutil.rmtree(d)
+            rmtree(d)
+
+
+def rmtree(path):
+    # Windows refuses to unlink read-only files, e.g. git pack files copied in by older versions.
+    def writable(func, p, _):
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=writable)
+    else:
+        shutil.rmtree(path, onerror=writable)
 
 
 # --- Claude Code hooks ----------------------------------------------------------

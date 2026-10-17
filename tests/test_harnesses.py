@@ -2,6 +2,7 @@
 import json
 import os
 import shutil
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -65,6 +66,17 @@ class HarnessTests(unittest.TestCase):
         h.connect('codex', self.repo, out=self.quiet, adopt=True)
         self.assertIn('name: mine', (skills / 'mine' / 'SKILL.md').read_text(encoding='utf-8'))
         self.assertTrue((skills / 'mine' / h.OWNED).exists())
+
+    def test_refresh_replaces_read_only_files_and_skips_git_dir(self):
+        write(self.repo / 'skills' / 'mine' / '.git' / 'HEAD', 'ref: refs/heads/main\n')
+        skills = self.home / '.codex' / 'skills'
+        h.connect('codex', self.repo, out=self.quiet)
+        self.assertFalse((skills / 'mine' / '.git').exists())
+        pack = skills / 'mine' / 'pack.idx'
+        write(pack, 'x')
+        os.chmod(pack, stat.S_IREAD)
+        h.copy_skills(self.repo, skills, out=self.quiet)
+        self.assertFalse(pack.exists())
 
     def test_dot_claude_skills_layout_is_a_source_and_wins_clashes(self):
         write(self.repo / '.claude' / 'skills' / 'legacy' / 'SKILL.md', '---\nname: legacy\n---\n')
