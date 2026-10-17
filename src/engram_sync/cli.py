@@ -210,7 +210,9 @@ def print_status(repo):
     nodes = []
     for f in sorted((repo / NODES).glob('*.json')):
         try:
-            nodes.append(json.loads(f.read_text(encoding='utf-8')))
+            n = json.loads(f.read_text(encoding='utf-8'))
+            if isinstance(n, dict):
+                nodes.append({k: re.sub(r'[\x00-\x1f\x7f]', '', v) if isinstance(v, str) else v for k, v in n.items()})
         except (OSError, ValueError) as e:
             say('[engram] unreadable %s: %s' % (f.name, e))
     if not nodes:
@@ -224,7 +226,9 @@ def print_status(repo):
     for n in nodes:
         host, age = n.get('host', '?'), age_secs(n.get('synced'))
         # heartbeat-only commits don't count: a node is behind only on memory it hasn't pulled
-        rc, behind = git(repo, 'rev-list', '--count', '%s..HEAD' % n.get('head', ''), '--', '.', ':!' + NODES)
+        head = str(n.get('head', ''))
+        rc, behind = (git(repo, 'rev-list', '--count', '%s..HEAD' % head, '--', '.', ':!' + NODES)
+                      if re.fullmatch(r'[0-9a-f]{40}([0-9a-f]{24})?', head) else (1, ''))
         notes = []
         if host == me:
             notes.append('this machine')

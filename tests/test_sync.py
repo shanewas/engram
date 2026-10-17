@@ -243,6 +243,18 @@ class TestContract(Base):
         self.assertGreater(int(git(self.origin, 'rev-list', '--count', 'main')), int(commits))
 
 
+    def test_heartbeat_refuses_symlinked_nodes_dir(self):
+        target = self.tmp / 'outside'
+        target.mkdir()
+        try:
+            os.symlink(str(target), str(self.a / 'nodes'), target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest('symlinks not permitted here')
+        out = self.sync(self.a, 'push', host='alpha')
+        self.assertIn('heartbeat skipped', out)
+        self.assertEqual(list(target.iterdir()), [])
+
+
 class TestStatus(Base):
     def test_status_flags_stale_outdated_and_conflict(self):
         from engram_sync import cli
@@ -256,6 +268,13 @@ class TestStatus(Base):
         beta = next(l for l in out if l.startswith('beta'))
         for flag in ('STALE', 'UPDATE', 'CONFLICT'):
             self.assertIn(flag, beta)
+        write(self.a / 'nodes' / 'evil.json', '{"host": "evil", "head": "--output=x", "version": "3.0.0"}\n')
+        write(self.a / 'nodes' / 'list.json', '[1]\n')
+        out.clear()
+        with unittest.mock.patch.object(cli, 'say', out.append):
+            cli.print_status(self.a)
+        self.assertIn('?', next(l for l in out if l.startswith('evil')))
+        self.assertFalse((self.a / 'x').exists())
         alpha = next(l for l in out if l.startswith('alpha'))
         self.assertIn(' 0 ', alpha)
         self.assertNotIn('UPDATE', alpha)

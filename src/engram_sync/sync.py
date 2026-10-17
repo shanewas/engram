@@ -255,6 +255,8 @@ class Sync:
     def heartbeat(self):
         """Rewrite nodes/<host>.json when this node's facts change or the last one is HEARTBEAT_SECS old."""
         path = self.repo / NODES / (self.host + '.json')
+        if path.parent.is_symlink() or path.is_symlink():
+            raise OSError('%s is a symlink; refusing to write through it' % path)
         info = {'host': self.host, 'os': '%s %s' % (platform.system(), platform.release()), 'version': __version__}
         if self.node_info:
             info.update(self.node_info())
