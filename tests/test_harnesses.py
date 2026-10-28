@@ -165,6 +165,20 @@ class HarnessTests(unittest.TestCase):
         self.assertTrue((dest / h.OWNED).exists())
         self.assertEqual(sorted(p.name for p in dest_root.iterdir()), before)
 
+    def test_copy_skills_removes_stale_managed_destination(self):
+        dest_root = self.tmp / 'dest-skills'
+        write(dest_root / 'stale-skill' / 'SKILL.md', '---\nname: stale-skill\n---\n')
+        write(dest_root / 'stale-skill' / h.OWNED, 'managed by engram-sync\n')
+        write(dest_root / 'unmanaged-skill' / 'SKILL.md', 'user owned\n')
+        out = []
+        h.copy_skills(self.repo, dest_root, out=out.append)
+        self.assertFalse((dest_root / 'stale-skill').exists())
+        self.assertTrue((dest_root / 'mine' / 'SKILL.md').exists())
+        self.assertTrue((dest_root / 'mine' / h.OWNED).exists())
+        self.assertEqual((dest_root / 'unmanaged-skill' / 'SKILL.md').read_text(encoding='utf-8'),
+                         'user owned\n')
+        self.assertTrue(any('stale-skill' in m for m in out))
+
     def test_refresh_updates_only_connected_harnesses(self):
         h.connect('antigravity', self.repo, out=self.quiet)
         write(self.repo / 'skills' / 'new' / 'SKILL.md', '---\nname: new\n---\n')
@@ -236,6 +250,26 @@ class InitTests(unittest.TestCase):
         self.assertEqual(self.init(self.tmp / 'pc1'), 1)
         write(self.tmp / 'junk' / 'f.txt', 'x')
         self.assertEqual(self.init(self.tmp / 'junk'), 1)
+
+    def test_init_failing_seed_commit_returns_1_and_never_ready(self):
+        # Mock cli.git for the commit call: a real failure would depend on the
+        # machine's global git identity, so it is not hermetic.
+        real_git = cli.git
+
+        def fake_git(repo, *args):
+            if args[:1] == ('commit',):
+                return 1, 'Committer identity unknown'
+            return real_git(repo, *args)
+
+        out = []
+        with mock.patch.object(cli, 'git', side_effect=fake_git), \
+                mock.patch.object(cli, 'say', out.append):
+            rc = self.init(self.tmp / 'pc1')
+        self.assertEqual(rc, 1)
+        self.assertFalse(any('ready' in m for m in out))
+        self.assertTrue(any('seed commit failed' in m and 'Committer identity unknown' in m
+                            for m in out))
+        self.assertIn('index.md', git(self.tmp / 'pc1', 'status', '--porcelain'))
 
     def test_owner_name_shorthand(self):
         self.assertEqual(cli.expand_url('alice/memory'), 'https://github.com/alice/memory.git')
