@@ -38,8 +38,8 @@ http.lowSpeedTime=15
 `.git/engram-sync.lock`, containing the pid and an ISO-8601 UTC timestamp.
 
 - Held → **exit 0 immediately** (do not wait). A concurrent sync is already doing the work.
-- Stale (> 5 min old) → steal it.
-- Always released, including on error.
+- Stale (> 5 min old) → steal it. An unparseable stamp is judged by the lock file's mtime instead.
+- Always released, including on error — but only while the file still holds the stamp this process wrote.
 
 ## 3. Paths
 

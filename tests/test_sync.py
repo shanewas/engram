@@ -162,6 +162,33 @@ class TestContract(Base):
         self.assertIn('inbox/l.md', self.origin_files())
         self.assertFalse(lock.exists())
 
+    def test_lock_fresh_empty_blocks_and_unparseable_old_is_stolen(self):
+        lock = self.a / '.git' / 'engram-sync.lock'
+        write(lock, '')
+        self.assertFalse(Sync(self.a, out=lambda m: None).acquire_lock())
+        write(lock, 'garbage\n')
+        old = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=10)).timestamp()
+        os.utime(lock, (old, old))
+        s = Sync(self.a, out=lambda m: None)
+        self.assertTrue(s.acquire_lock())
+        s.release_lock()
+        self.assertFalse(lock.exists())
+
+    def test_release_lock_does_not_unlink_replaced_lock(self):
+        lock = self.a / '.git' / 'engram-sync.lock'
+        s = Sync(self.a, out=lambda m: None)
+        self.assertTrue(s.acquire_lock())
+        write(lock, '999 %s\n' % iso_now())
+        s.release_lock()
+        self.assertTrue(lock.exists())
+
+    def test_release_lock_unlinks_own_untouched_lock(self):
+        lock = self.a / '.git' / 'engram-sync.lock'
+        s = Sync(self.a, out=lambda m: None)
+        self.assertTrue(s.acquire_lock())
+        s.release_lock()
+        self.assertFalse(lock.exists())
+
     def test_readonly_node_never_pushes(self):
         write(self.a / '.git' / 'engram-readonly', '')
         write(self.a / 'inbox' / 'r.md', '- x\n')
@@ -325,6 +352,15 @@ class TestStatus(Base):
         alpha = next(l for l in out if l.startswith('alpha'))
         self.assertIn(' 0 ', alpha)
         self.assertNotIn('UPDATE', alpha)
+
+    def test_status_tolerates_malformed_node_fields(self):
+        from engram_sync import cli
+        write(self.a / 'nodes' / 'bad1.json', '{"host": ["x"], "agents": [1]}\n')
+        write(self.a / 'nodes' / 'bad2.json', '{"agents": 5}\n')
+        out = []
+        with unittest.mock.patch.object(cli, 'say', out.append):
+            cli.print_status(self.a)
+        self.assertTrue(any(l.startswith('?') for l in out))
 
 
 if __name__ == '__main__':

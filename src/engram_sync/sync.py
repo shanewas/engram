@@ -87,6 +87,7 @@ class Sync:
         self.alert = self.repo / 'ALERT.md'
         self.lock = self.git_dir / 'engram-sync.lock'
         self.lock_ours = False
+        self.lock_stamp = None
 
     # --- git ----------------------------------------------------------------
     def git(self, *args, remote=False):
@@ -119,27 +120,36 @@ class Sync:
         except FileExistsError:
             try:
                 age = age_secs(self.lock.read_text(encoding='utf-8').split()[1])
-            except (OSError, IndexError):
-                age = STALE_SECS + 1
+                if age == float('inf'):
+                    raise ValueError('unparseable lock stamp')
+            except (OSError, IndexError, ValueError):
+                try:
+                    age = datetime.datetime.now(datetime.timezone.utc).timestamp() - self.lock.stat().st_mtime
+                except OSError:
+                    age = STALE_SECS + 1
             if age <= STALE_SECS:
                 return False
             tmp = self.lock.with_name('engram-sync.lock.%d' % os.getpid())
             tmp.write_text(stamp, encoding='utf-8')
             os.replace(str(tmp), str(self.lock))
             self.lock_ours = True
+            self.lock_stamp = stamp
             return True
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             f.write(stamp)
         self.lock_ours = True
+        self.lock_stamp = stamp
         return True
 
     def release_lock(self):
         if self.lock_ours:
             try:
-                self.lock.unlink()
-            except FileNotFoundError:
+                if self.lock.read_text(encoding='utf-8') == self.lock_stamp:
+                    self.lock.unlink()
+            except OSError:
                 pass
             self.lock_ours = False
+            self.lock_stamp = None
 
     def self_heal_rebase(self):
         if (self.git_dir / 'rebase-merge').exists() or (self.git_dir / 'rebase-apply').exists():
