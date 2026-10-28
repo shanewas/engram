@@ -4,6 +4,7 @@ import os
 import shutil
 import stat
 import sys
+import tempfile
 from pathlib import Path
 
 BEGIN = '<!-- engram-sync:begin -->'
@@ -53,6 +54,23 @@ def engram_cmd(repo, verb):
     return '"%s" -m engram_sync --repo "%s" %s' % (fwd(sys.executable), fwd(repo), verb)
 
 
+def _write_text(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + '.', suffix='.tmp')
+    try:
+        if path.exists():
+            os.chmod(tmp, stat.S_IMODE(path.stat().st_mode))
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 # --- instruction block --------------------------------------------------------
 
 def block(repo, with_import):
@@ -67,25 +85,27 @@ def block(repo, with_import):
 
 def upsert_block(path, text):
     old = path.read_text(encoding='utf-8') if path.exists() else ''
-    if BEGIN in old and END in old:
-        head, rest = old.split(BEGIN, 1)
-        new = head + text.rstrip('\n') + rest.split(END, 1)[1]
+    begin = old.find(BEGIN)
+    end = old.find(END, begin + len(BEGIN)) if begin >= 0 else -1
+    if end >= 0:
+        new = old[:begin] + text.rstrip('\n') + old[end + len(END):]
     else:
         new = old + ('\n' if old and not old.endswith('\n') else '') + ('\n' if old else '') + text
     if new != old:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(new, encoding='utf-8')
+        _write_text(path, new)
 
 
 def remove_block(path):
     if not path or not path.exists():
         return
     old = path.read_text(encoding='utf-8')
-    if BEGIN not in old or END not in old:
+    begin = old.find(BEGIN)
+    end = old.find(END, begin + len(BEGIN)) if begin >= 0 else -1
+    if end < 0:
         return
-    head, rest = old.split(BEGIN, 1)
-    new = (head.rstrip('\n') + '\n' + rest.split(END, 1)[1].lstrip('\n')).lstrip('\n')
-    path.write_text(new, encoding='utf-8')
+    head, rest = old[:begin], old[end + len(END):]
+    new = (head.rstrip('\n') + '\n' + rest.lstrip('\n')).lstrip('\n')
+    _write_text(path, new)
 
 
 def has_block(path):
@@ -115,12 +135,22 @@ def copy_skills(repo, dest_root, out=print, adopt=False):
         if foreign and not adopt:
             out('[engram] skip skill %s: %s exists and is not managed by engram-sync (use --adopt)' % (name, dest))
             continue
+        tmp = Path(tempfile.mkdtemp(dir=dest_root, prefix='.%s.tmp-' % name))
+        tmp.rmdir()
+        try:
+            shutil.copytree(src, tmp, ignore=shutil.ignore_patterns('__pycache__', '.git'))
+            (tmp / OWNED).write_text('managed by engram-sync; edits here are overwritten\n', encoding='utf-8')
+        except BaseException:
+            if tmp.is_symlink() or tmp.is_file():
+                tmp.unlink()
+            elif tmp.exists():
+                shutil.rmtree(tmp, ignore_errors=True)
+            raise
         if dest.is_symlink():
             dest.unlink()
         elif dest.exists():
             rmtree(dest)
-        shutil.copytree(src, dest, ignore=shutil.ignore_patterns('__pycache__', '.git'))
-        (dest / OWNED).write_text('managed by engram-sync; edits here are overwritten\n', encoding='utf-8')
+        os.replace(tmp, dest)
 
 
 def remove_skills(dest_root):
@@ -149,19 +179,37 @@ def _is_engram_hook(cmd):
     return 'engram_sync' in cmd or ('engram' in cmd and ('sync.sh' in cmd or 'sync.ps1' in cmd))
 
 
+def _bad_settings(path, detail):
+    return ValueError('invalid settings file %s: %s' % (path, detail))
+
+
 def _load_settings(path):
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding='utf-8-sig') or '{}')
+    try:
+        settings = json.loads(path.read_text(encoding='utf-8-sig') or '{}')
+    except json.JSONDecodeError as e:
+        raise _bad_settings(path, e) from e
+    if not isinstance(settings, dict):
+        raise _bad_settings(path, 'top level must be a JSON object')
+    return settings
 
 
 def set_claude_hooks(spec, repo, enable):
     path = spec['settings']
     settings = _load_settings(path)
     hooks = settings.setdefault('hooks', {})
+    if not isinstance(hooks, dict):
+        raise _bad_settings(path, 'hooks must be an object')
     for event in ('SessionStart', 'SessionEnd'):
+        if not isinstance(hooks.get(event, []), list):
+            raise _bad_settings(path, 'hooks.%s must be a list' % event)
         groups = []
         for g in hooks.get(event, []):
+            if not isinstance(g, dict) or not isinstance(g.get('hooks', []), list):
+                raise _bad_settings(path, 'hooks.%s entries must be objects with a hooks list' % event)
+            if any(not isinstance(x, dict) for x in g.get('hooks', [])):
+                raise _bad_settings(path, 'hooks.%s entries must be objects' % event)
             kept = [h for h in g.get('hooks', []) if not _is_engram_hook(h.get('command', ''))]
             if kept:
                 groups.append(dict(g, hooks=kept))
@@ -175,17 +223,21 @@ def set_claude_hooks(spec, repo, enable):
             hooks.pop(event, None)
     if not hooks:
         settings.pop('hooks', None)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+    _write_text(path, json.dumps(settings, indent=2, ensure_ascii=False) + '\n')
 
 
 def has_claude_hooks(spec):
     try:
         hooks = _load_settings(spec['settings']).get('hooks', {})
-    except ValueError:
+    except (ValueError, AttributeError, TypeError):
         return False
-    return all(any('engram_sync' in h.get('command', '') for g in hooks.get(e, []) for h in g.get('hooks', []))
-               for e in ('SessionStart', 'SessionEnd'))
+    if not isinstance(hooks, dict):
+        return False
+    try:
+        return all(any('engram_sync' in h.get('command', '') for g in hooks.get(e, []) for h in g.get('hooks', []))
+                   for e in ('SessionStart', 'SessionEnd'))
+    except (AttributeError, TypeError):
+        return False
 
 
 # --- connect / disconnect ---------------------------------------------------------

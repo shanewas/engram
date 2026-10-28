@@ -113,6 +113,58 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in (claude / 'skills').iterdir()), ['other'])
         self.assertNotIn('hooks', json.loads((claude / 'settings.json').read_text(encoding='utf-8')))
 
+    def test_reversed_markers_do_not_crash(self):
+        path = self.tmp / 'CLAUDE.md'
+        original = '# rules\n%s\n%s\n' % (h.END, h.BEGIN)
+        write(path, original)
+        h.remove_block(path)
+        self.assertEqual(path.read_text(encoding='utf-8'), original)
+        h.upsert_block(path, h.block(self.repo, False))
+        text = path.read_text(encoding='utf-8')
+        self.assertTrue(text.startswith(original))
+        self.assertIn('# Engram memory', text[len(original):])
+
+    def test_atomic_writes_leave_no_temp_files(self):
+        md = self.tmp / 'atomic' / 'CLAUDE.md'
+        write(md, '# mine\n')
+        h.upsert_block(md, h.block(self.repo, False))
+        self.assertEqual([p.name for p in md.parent.iterdir()], ['CLAUDE.md'])
+        self.assertIn(h.BEGIN, md.read_text(encoding='utf-8'))
+        spec = h.registry()['claude']
+        write(spec['settings'], json.dumps({'model': 'x'}))
+        h.set_claude_hooks(spec, self.repo, True)
+        self.assertEqual([p.name for p in spec['settings'].parent.iterdir()], ['settings.json'])
+        self.assertIn('hooks', json.loads(spec['settings'].read_text(encoding='utf-8')))
+
+    def test_set_claude_hooks_rejects_malformed_settings(self):
+        spec = h.registry()['claude']
+        for text in ('[1, 2]', 'not json', '{"hooks": []}',
+                     '{"hooks": {"SessionStart": {}}}', '{"hooks": {"SessionStart": ["x"]}}'):
+            with self.subTest(text=text):
+                write(spec['settings'], text)
+                with self.assertRaises(ValueError):
+                    h.set_claude_hooks(spec, self.repo, True)
+                self.assertFalse(h.has_claude_hooks(spec))
+
+    def test_failed_skill_copy_keeps_old_destination(self):
+        dest_root = self.tmp / 'dest-skills'
+        h.copy_skills(self.repo, dest_root, out=self.quiet)
+        dest = dest_root / 'mine'
+        old = (dest / 'SKILL.md').read_text(encoding='utf-8')
+        write(dest / 'keep.txt', 'keep\n')
+        before = sorted(p.name for p in dest_root.iterdir())
+        try:
+            os.symlink(str(self.repo / 'skills' / 'mine' / 'missing'),
+                       str(self.repo / 'skills' / 'mine' / 'broken'))
+        except (OSError, NotImplementedError):
+            self.skipTest('symlinks not permitted here')
+        with self.assertRaises(shutil.Error):
+            h.copy_skills(self.repo, dest_root, out=self.quiet)
+        self.assertEqual((dest / 'SKILL.md').read_text(encoding='utf-8'), old)
+        self.assertEqual((dest / 'keep.txt').read_text(encoding='utf-8'), 'keep\n')
+        self.assertTrue((dest / h.OWNED).exists())
+        self.assertEqual(sorted(p.name for p in dest_root.iterdir()), before)
+
     def test_refresh_updates_only_connected_harnesses(self):
         h.connect('antigravity', self.repo, out=self.quiet)
         write(self.repo / 'skills' / 'new' / 'SKILL.md', '---\nname: new\n---\n')
