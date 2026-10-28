@@ -205,9 +205,15 @@ class Sync:
         if not log.is_file():
             return
         dates = re.findall(r'^- (\d{4}-\d{2}-\d{2})', log.read_text(encoding='utf-8', errors='replace'), re.M)
-        if not dates:
+        last = None
+        for d in reversed(dates):
+            try:
+                last = datetime.date.fromisoformat(d)
+                break
+            except ValueError:
+                continue
+        if last is None:
             return
-        last = datetime.date.fromisoformat(dates[-1])
         age = (datetime.datetime.now(datetime.timezone.utc).date() - last).days
         if age >= NUDGE_DAYS:
             self.out('[engram] Last memory consolidation was %d days ago — say "consolidate memory" when convenient.' % age)
@@ -221,6 +227,9 @@ class Sync:
             return 0
         if (self.git_dir / 'rebase-merge').exists() or (self.git_dir / 'rebase-apply').exists():
             self.git('rebase', '--abort')
+            return 1
+        _, unmerged = self.git('diff', '--name-only', '--diff-filter=U')
+        if unmerged.strip():
             return 1
         return 2
 
@@ -264,6 +273,8 @@ class Sync:
             old = json.loads(path.read_text(encoding='utf-8'))
         except (OSError, ValueError):
             old = {}
+        if not isinstance(old, dict):
+            old = {}
         synced, _ = old.pop('synced', ''), old.pop('head', None)
         if old == info and age_secs(synced) < HEARTBEAT_SECS:
             return
@@ -277,18 +288,25 @@ class Sync:
             self.heartbeat()
         except OSError as e:
             self.out('[engram] node heartbeat skipped: %s' % e)
-        for p in load_allowlist(self.repo) + [NODES]:
+        staged = []
+        for p in load_allowlist(self.repo):
             if (self.repo / p).exists():
                 self.git('add', '-A', '--', p)
-        _, diff = self.git('diff', '--cached', '-U0', '--text')
+                staged.append(p)
+        heartbeat_path = '%s/%s.json' % (NODES, self.host)
+        heartbeat_abs = self.repo / heartbeat_path
+        if heartbeat_abs.exists() and not heartbeat_abs.is_symlink() and not heartbeat_abs.parent.is_symlink():
+            self.git('add', '-A', '--', heartbeat_path)
+            staged.append(heartbeat_path)
+        _, diff = self.git('diff', '--cached', '-U0', '--text', '--', *staged) if staged else (0, '')
         hits = scan_secrets(diff)
         if hits:
-            self.git('reset')
+            self.git('reset', '-q', '--', *staged)
             self.write_secret_alert(hits)
             self.set_state(False, 'secret scan hit')
             return
-        if self.git('diff', '--cached', '--quiet')[0] != 0:
-            rc, out = self.git('commit', '-q', '-m', 'sync(%s): %s' % (self.host, iso_now()))
+        if staged and self.git('diff', '--cached', '--quiet', '--', *staged)[0] != 0:
+            rc, out = self.git('commit', '-q', '-m', 'sync(%s): %s' % (self.host, iso_now()), '--', *staged)
             if rc != 0:
                 self.set_state(False, 'push: commit failed: ' + out.strip()[:200])
                 return

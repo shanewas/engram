@@ -254,6 +254,53 @@ class TestContract(Base):
         self.assertIn('heartbeat skipped', out)
         self.assertEqual(list(target.iterdir()), [])
 
+    def test_pre_staged_outside_allowlist_not_committed(self):
+        write(self.a / 'notes.txt', 'x\n')
+        git(self.a, 'add', '--', 'notes.txt')
+        write(self.a / 'inbox' / 'i.md', '- ok\n')
+        self.sync(self.a, 'push')
+        self.assertNotIn('notes.txt', self.origin_files())
+        self.assertIn('inbox/i.md', self.origin_files())
+        self.assertEqual(git(self.a, 'diff', '--cached', '--name-only'), 'notes.txt')
+
+    def test_other_node_heartbeat_not_committed(self):
+        self.sync(self.b, 'push', host='other')
+        self.sync(self.a, 'pull')
+        write(self.a / 'nodes' / 'other.json', '{"host": "other", "changed": true}\n')
+        self.sync(self.a, 'push', host='a')
+        self.assertNotIn('"changed": true', git(self.origin, 'show', 'main:nodes/other.json'))
+        self.assertIn('nodes/a.json', self.origin_files())
+        self.assertEqual(git(self.a, 'diff', '--name-only', '--', 'nodes/other.json'), 'nodes/other.json')
+
+    def test_pull_rebase_unmerged_without_rebase_is_conflict(self):
+        # Constructed directly: a plain merge conflict leaves unmerged entries
+        # with no rebase in progress, the state an autostash-apply conflict
+        # leaves behind, rather than a full autostash-conflict setup.
+        git(self.a, 'checkout', '-q', '-b', 'side')
+        write(self.a / 'index.md', '# side\n')
+        git(self.a, 'commit', '-q', '-am', 'side')
+        git(self.a, 'checkout', '-q', 'main')
+        write(self.a / 'index.md', '# main\n')
+        git(self.a, 'commit', '-q', '-am', 'main')
+        git(self.a, 'merge', 'side', check=False)
+        self.assertTrue(git(self.a, 'diff', '--name-only', '--diff-filter=U'))
+        self.assertFalse((self.a / '.git' / 'rebase-merge').exists())
+        self.assertFalse((self.a / '.git' / 'rebase-apply').exists())
+        self.assertEqual(Sync(self.a, out=lambda m: None).pull_rebase(), 1)
+
+    def test_push_with_non_dict_heartbeat_file(self):
+        write(self.a / 'nodes' / 'node.json', '[1]\n')
+        self.sync(self.a, 'push')
+        self.assertIn('nodes/node.json', self.origin_files())
+        self.assertTrue(self.state(self.a).startswith('ok '))
+
+    def test_consolidate_nudge_ignores_invalid_date(self):
+        old = (datetime.date.today() - datetime.timedelta(days=9)).isoformat()
+        write(self.a / 'archive' / 'consolidate-log.md', '- %s a\n- 2026-02-30 x\n' % old)
+        out = []
+        Sync(self.a, out=out.append).consolidate_nudge()
+        self.assertIn('consolidat', '\n'.join(out))
+
 
 class TestStatus(Base):
     def test_status_flags_stale_outdated_and_conflict(self):
