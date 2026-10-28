@@ -129,7 +129,8 @@ def skill_sources(repo):
 def copy_skills(repo, dest_root, out=print, adopt=False):
     """Copy skills as real dirs. Replaces a dir this tool did not create only when adopt is set."""
     dest_root.mkdir(parents=True, exist_ok=True)
-    for name, src in skill_sources(repo).items():
+    sources = skill_sources(repo)
+    for name, src in sources.items():
         dest = dest_root / name
         foreign = dest.is_symlink() or (dest.exists() and not (dest / OWNED).exists())
         if foreign and not adopt:
@@ -151,6 +152,10 @@ def copy_skills(repo, dest_root, out=print, adopt=False):
         elif dest.exists():
             rmtree(dest)
         os.replace(tmp, dest)
+    for d in sorted(dest_root.iterdir()):
+        if d.name not in sources and (d / OWNED).exists():
+            out('[engram] remove stale skill %s: no longer provided' % d.name)
+            rmtree(d)
 
 
 def remove_skills(dest_root):

@@ -175,8 +175,12 @@ def cmd_init(a):
             return 1
     written = seed(repo)
     if written:
-        git(repo, 'add', '--', *written)
-        git(repo, 'commit', '-q', '-m', 'engram: initialize memory repo')
+        rc, out = git(repo, 'add', '--', *written)
+        if rc == 0:
+            rc, out = git(repo, 'commit', '-q', '-m', 'engram: initialize memory repo')
+        if rc != 0:
+            say('[engram] seed commit failed:\n%s' % out)
+            return 1
         rc, out = git(repo, 'push', '-u', 'origin', 'HEAD')
         if rc != 0:
             say('[engram] first push failed (sync will retry):\n%s' % out)
