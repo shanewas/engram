@@ -72,6 +72,8 @@ def schedule(repo, enable):
     if not shutil.which('crontab'):
         return False, 'crontab not found'
     cur = subprocess.run(['crontab', '-l'], capture_output=True, encoding='utf-8', errors='replace')
+    if cur.returncode != 0 and 'no crontab for' not in (cur.stderr or ''):
+        return False, (cur.stdout + cur.stderr).strip()
     lines = [l for l in (cur.stdout if cur.returncode == 0 else '').splitlines() if CRON_TAG not in l]
     if enable:
         lines.append('*/30 * * * * "%s" -m engram_sync --repo "%s" sync push >/dev/null 2>&1 %s'
@@ -212,7 +214,14 @@ def print_status(repo):
         try:
             n = json.loads(f.read_text(encoding='utf-8'))
             if isinstance(n, dict):
-                nodes.append({k: re.sub(r'[\x00-\x1f\x7f]', '', v) if isinstance(v, str) else v for k, v in n.items()})
+                n = {k: re.sub(r'[\x00-\x1f\x7f]', '', v) if isinstance(v, str) else v for k, v in n.items()}
+                if not isinstance(n.get('host'), str) or not n.get('host'):
+                    n['host'] = '?'
+                if isinstance(n.get('agents'), list):
+                    n['agents'] = [re.sub(r'[\x00-\x1f\x7f]', '', a) for a in n['agents'] if isinstance(a, str)]
+                elif 'agents' in n:
+                    del n['agents']
+                nodes.append(n)
         except (OSError, ValueError) as e:
             say('[engram] unreadable %s: %s' % (f.name, e))
     if not nodes:

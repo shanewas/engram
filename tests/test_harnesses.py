@@ -121,6 +121,35 @@ class HarnessTests(unittest.TestCase):
         self.assertFalse((self.home / '.codex').exists())
 
 
+class ScheduleTests(unittest.TestCase):
+    def run_schedule(self, list_result):
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            if cmd == ['crontab', '-l']:
+                return list_result
+            return mock.Mock(returncode=0, stdout='', stderr='')
+
+        with mock.patch.object(cli.subprocess, 'run', side_effect=fake_run), \
+                mock.patch.object(cli.shutil, 'which', return_value='/usr/bin/crontab'):
+            result = cli.schedule(Path('/tmp/mem'), True)
+        return result, calls
+
+    def test_schedule_other_crontab_failure_does_not_install(self):
+        (ok, msg), calls = self.run_schedule(
+            mock.Mock(returncode=1, stdout='', stderr='crontab: permission denied\n'))
+        self.assertFalse(ok)
+        self.assertIn('permission denied', msg)
+        self.assertEqual(calls, [['crontab', '-l']])
+
+    def test_schedule_no_crontab_installs(self):
+        (ok, _msg), calls = self.run_schedule(
+            mock.Mock(returncode=1, stdout='', stderr='no crontab for tester\n'))
+        self.assertTrue(ok)
+        self.assertIn(['crontab', '-'], calls)
+
+
 class InitTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix='engram-init-'))
